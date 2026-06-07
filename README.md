@@ -55,28 +55,6 @@ The system provides **role-based access**, **OCR-powered document reading**, and
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        CLIENT LAYER                         │
-│               React + Vite + Tailwind CSS                   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ HTTP (Axios)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                          API LAYER                          │
-│               Node.js + Express.js + JWT + RBAC             │
-└───────────────┬───────────────────────────────┬─────────────┘
-                │ Mongoose                      │ HTTP
-                ▼                               ▼
-┌────────────────────────┐   ┌────────────────────────────────┐
-│       DATA LAYER       │   │        AI MICROSERVICE         │
-│  MongoDB (Atlas/Local) │◀──┤         Python FastAPI         │
-│                        │   │   OCR · QR Gen · Bottleneck    │
-└────────────────────────┘   └────────────────────────────────┘
-```
-
-For a visual representation, here is the architecture diagram:
-
 ```mermaid
 graph TD
     %% Define Styles
@@ -86,7 +64,7 @@ graph TD
     classDef db fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000;
 
     %% Define Nodes
-    Client["Client Layer<br>(React + Vite + Tailwind)"]:::client
+    Client["Client Layer<br>(React.js)"]:::client
     API["API Layer<br>(Node.js + Express + JWT/RBAC)"]:::api
     AI["AI Microservice<br>(FastAPI - Python)"]:::ai
     DB[("Data Layer<br>(MongoDB)")]:::db
@@ -104,7 +82,7 @@ graph TD
 
 ```
 TraceGov/
-├── frontend/                  # React + Vite
+├── frontend/                  # React.js
 │   ├── src/
 │   │   ├── components/        # Reusable UI components
 │   │   ├── pages/             # Route-level pages
@@ -112,7 +90,7 @@ TraceGov/
 │   │   ├── services/          # Axios API calls
 │   │   ├── context/           # Auth context / global state
 │   │   └── utils/             # Helper functions
-│   └── .env                   # VITE_API_URL, VITE_AI_URL
+│   └── .env                   # REACT_APP_API_URL, REACT_APP_AI_URL
 │
 ├── backend/                   # Node.js + Express
 │   ├── controllers/           # Route handler logic
@@ -237,13 +215,13 @@ git checkout dev
 cd frontend
 npm install
 cp .env.example .env        # fill in your values
-npm run dev                 # runs on http://localhost:5173
+npm start                   # runs on http://localhost:3000
 ```
 
 **`.env` variables:**
 ```env
-VITE_API_URL=http://localhost:5000/api
-VITE_AI_URL=http://localhost:8000
+REACT_APP_API_URL=http://localhost:5000/api
+REACT_APP_AI_URL=http://localhost:8000
 ```
 
 ---
@@ -292,7 +270,7 @@ PORT=8000
 
 | Member | Role |
 |---|---|
-| Sudeep Mishra | Frontend — React, Tailwind, UI/UX |
+| Sudeep Mishra | Frontend — React.js, UI/UX |
 | Member 2 | Backend — Node.js, Express, JWT |
 | Member 3 | Database — MongoDB, Mongoose Schemas |
 | Member 4 | AI Service — FastAPI, OCR, QR Generation |

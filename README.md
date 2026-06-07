@@ -296,9 +296,9 @@ git checkout -b feature/your-feature-name
 # Push and open PR into dev
 git push origin feature/your-feature-name
 ```
--->
----
 
+---
+-->
 ## License
 
 This project is licensed under the [MIT License](LICENSE).

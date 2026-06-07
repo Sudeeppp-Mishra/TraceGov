@@ -2,14 +2,14 @@
 
 <br />
 
-```
+<pre>
 ████████╗██████╗  █████╗  ██████╗███████╗ ██████╗  ██████╗ ██╗   ██╗
 ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██╔════╝██╔════╝ ██╔═══██╗██║   ██║
    ██║   ██████╔╝███████║██║     █████╗  ██║  ███╗██║   ██║██║   ██║
    ██║   ██╔══██╗██╔══██║██║     ██╔══╝  ██║   ██║██║   ██║╚██╗ ██╔╝
-   ██║   ██║  ██║██║  ██║╚██████╗███████╗╚██████╔╝╚██████╔╝ ╚████╔╝ 
-   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝ ╚═════╝  ╚═════╝   ╚═══╝  
-```
+   ██║   ██║  ██║██║  ██║╚██████╗███████╗╚██████╔╝╚██████╔╝ ╚████╔╝
+   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝ ╚═════╝  ╚═════╝   ╚═══╝
+</pre>
 
 ### QR-Based Government File Tracking System
 
@@ -31,7 +31,7 @@
 
 ## Overview
 
-**TraceGov** is a full-stack web application designed to digitize and streamline government document management. Each document is assigned a unique **QR code** for real-time tracking across departments, eliminating manual handoffs and lost files.
+**TraceGov** is a full-stack web application designed to digitize and streamline government document management, enhancing **transparency and accountability** in public administration. Each document is assigned a unique **QR code** for real-time tracking across departments, eliminating manual handoffs and lost files.
 
 The system provides **role-based access**, **OCR-powered document reading**, and an **AI microservice** that detects bottlenecks in the document flow — giving administrators data-driven insight into departmental efficiency.
 

@@ -57,8 +57,8 @@ The system provides **role-based access**, **OCR-powered document reading**, and
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        CLIENT LAYER                          │
-│               React + Vite + Tailwind CSS                    │
+│                        CLIENT LAYER                         │
+│               React + Vite + Tailwind CSS                   │
 └──────────────────────────────┬──────────────────────────────┘
                                │ HTTP (Axios)
                                ▼
@@ -86,10 +86,10 @@ graph TD
     classDef db fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000;
 
     %% Define Nodes
-    Client["💻 Client Layer<br>(React + Vite + Tailwind)"]:::client
-    API["⚙️ API Layer<br>(Node.js + Express + JWT/RBAC)"]:::api
-    AI["🤖 AI Microservice<br>(FastAPI - Python)"]:::ai
-    DB[("🗄️ Data Layer<br>(MongoDB)")]:::db
+    Client["Client Layer<br>(React + Vite + Tailwind)"]:::client
+    API["API Layer<br>(Node.js + Express + JWT/RBAC)"]:::api
+    AI["AI Microservice<br>(FastAPI - Python)"]:::ai
+    DB[("Data Layer<br>(MongoDB)")]:::db
 
     %% Define Connections
     Client -->|HTTP / Axios| API

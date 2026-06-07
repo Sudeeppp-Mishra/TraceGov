@@ -58,19 +58,44 @@ The system provides **role-based access**, **OCR-powered document reading**, and
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        CLIENT LAYER                          │
-│              React.js + Vite + Tailwind CSS                  │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ HTTP (Axios)
-┌──────────────────────────▼──────────────────────────────────┐
-│                       API LAYER                              │
-│              Node.js + Express.js + JWT + RBAC               │
-└─────────────┬────────────────────────────┬──────────────────┘
-              │ Mongoose                   │ HTTP
-┌─────────────▼──────────┐   ┌────────────▼──────────────────┐
-│      DATA LAYER        │   │        AI MICROSERVICE         │
-│   MongoDB (Atlas/Local)│   │  Python FastAPI                │
-│                        │   │  OCR · QR Gen · Bottleneck     │
+│               React + Vite + Tailwind CSS                    │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ HTTP (Axios)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                          API LAYER                          │
+│               Node.js + Express.js + JWT + RBAC             │
+└───────────────┬───────────────────────────────┬─────────────┘
+                │ Mongoose                      │ HTTP
+                ▼                               ▼
+┌────────────────────────┐   ┌────────────────────────────────┐
+│       DATA LAYER       │   │        AI MICROSERVICE         │
+│  MongoDB (Atlas/Local) │◀──┤         Python FastAPI         │
+│                        │   │   OCR · QR Gen · Bottleneck    │
 └────────────────────────┘   └────────────────────────────────┘
+```
+
+For a visual representation, here is the architecture diagram:
+
+```mermaid
+graph TD
+    %% Define Styles
+    classDef client fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000;
+    classDef api fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,color:#000;
+    classDef ai fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#000;
+    classDef db fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000;
+
+    %% Define Nodes
+    Client["💻 Client Layer<br>(React + Vite + Tailwind)"]:::client
+    API["⚙️ API Layer<br>(Node.js + Express + JWT/RBAC)"]:::api
+    AI["🤖 AI Microservice<br>(FastAPI - Python)"]:::ai
+    DB[("🗄️ Data Layer<br>(MongoDB)")]:::db
+
+    %% Define Connections
+    Client -->|HTTP / Axios| API
+    API -->|Mongoose ODM| DB
+    API -->|HTTP Requests| AI
+    AI -->|Database Query/Logs| DB
 ```
 
 ---

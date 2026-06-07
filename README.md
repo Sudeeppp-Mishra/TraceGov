@@ -17,6 +17,7 @@
 
 <br />
 
+[![Status](https://img.shields.io/badge/Status-Under_Development-orange?style=for-the-badge&logo=git)](https://github.com/Sudeeppp-Mishra/TraceGov)
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
 [![Node.js](https://img.shields.io/badge/Node.js-Express-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
 [![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](https://mongodb.com)
@@ -26,6 +27,11 @@
 <br />
 
 </div>
+
+> [!NOTE]
+> **Project Status: Initial Setup & Design Phase**  
+> This project has just been initialized. Coding has not yet started, and we are currently setting up the structure, configuration, and planning stages.
+
 
 ---
 

@@ -32,7 +32,6 @@
 > **Project Status: Initial Setup & Design Phase**  
 > This project has just been initialized. Coding has not yet started, and we are currently setting up the structure, configuration, and planning stages.
 
-
 ---
 
 ## Overview
@@ -47,15 +46,15 @@ The system provides **role-based access**, **OCR-powered document reading**, and
 
 ## Features
 
-| Feature | Description |
-|---|---|
-|  **Auth & RBAC** | JWT-based login with role-based access (Admin, Staff, Viewer) |
-|  **Document Management** | Create, update, and manage official documents |
-|  **QR Code Tracking** | Each document gets a unique QR — scan to update status & location |
-|  **OCR Processing** | Extract text from scanned/uploaded documents automatically |
-|  **Bottleneck Detection** | AI microservice identifies slow departments in document flow |
-|  **Tracking History** | Full audit trail — who scanned, when, and where |
-|  **Dashboard** | Real-time stats, recent activity, and department reports |
+| Feature                  | Description                                                       |
+| ------------------------ | ----------------------------------------------------------------- |
+| **Auth & RBAC**          | JWT-based login with role-based access (Admin, Staff, Viewer)     |
+| **Document Management**  | Create, update, and manage official documents                     |
+| **QR Code Tracking**     | Each document gets a unique QR — scan to update status & location |
+| **OCR Processing**       | Extract text from scanned/uploaded documents automatically        |
+| **Bottleneck Detection** | AI microservice identifies slow departments in document flow      |
+| **Tracking History**     | Full audit trail — who scanned, when, and where                   |
+| **Dashboard**            | Real-time stats, recent activity, and department reports          |
 
 ---
 
@@ -83,6 +82,7 @@ graph TD
 ```
 
 ---
+
 <!-- for now hidden
 ## Project Structure
 
@@ -305,6 +305,7 @@ git push origin feature/your-feature-name
 
 ---
 -->
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).

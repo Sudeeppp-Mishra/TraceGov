@@ -83,40 +83,43 @@ graph TD
 
 ---
 
-<!-- for now hidden
 ## Project Structure
 
 ```
 TraceGov/
-├── frontend/                  # React.js
+├── frontend/                  # React.js (Client)
 │   ├── src/
 │   │   ├── components/        # Reusable UI components
 │   │   ├── pages/             # Route-level pages
 │   │   ├── hooks/             # Custom React hooks
-│   │   ├── services/          # Axios API calls
-│   │   ├── context/           # Auth context / global state
+│   │   ├── services/          # API services
+│   │   ├── context/           # Auth & UI contexts
 │   │   └── utils/             # Helper functions
-│   └── .env                   # REACT_APP_API_URL, REACT_APP_AI_URL
+│   ├── .env                   # Local Environment Config (Ignored)
+│   └── .env.example           # Shared Environment Template
 │
-├── backend/                   # Node.js + Express
+├── backend/                   # Node.js + Express (API)
 │   ├── controllers/           # Route handler logic
 │   ├── routes/                # Express route definitions
 │   ├── models/                # Mongoose schemas
 │   ├── middleware/            # Auth, RBAC, error handling
 │   ├── utils/                 # JWT helpers, validators
-│   └── .env                   # PORT, MONGO_URI, JWT_SECRET
+│   ├── .env                   # Local Environment Config (Ignored)
+│   └── .env.example           # Shared Environment Template
 │
-├── ai-service/                # Python FastAPI
-│   ├── routes/                # OCR, QR, bottleneck endpoints
+├── ai-service/                # Python FastAPI (AI Microservice)
+│   ├── routes/                # Route definitions
 │   ├── services/              # Core logic (pytesseract, qrcode)
 │   ├── models/                # Pydantic schemas
-│   └── .env                   # MONGO_URI, PORT
+│   ├── .env                   # Local Environment Config (Ignored)
+│   └── .env.example           # Shared Environment Template
 │
 └── README.md
 ```
 
 ---
 
+<!--
 ## 🗄️ Database Schemas
 
 ### User

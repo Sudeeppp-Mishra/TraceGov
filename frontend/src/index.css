@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ward-green: #1a5f4a;
+  --color-ward-green-light: #2d8f6f;
+  --color-ward-gold: #c4a035;
+  --color-ward-cream: #f7f5f0;
+}
+
+body {
+  @apply bg-ward-cream text-gray-900 antialiased;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}

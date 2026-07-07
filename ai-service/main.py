@@ -10,7 +10,7 @@ import base64
 import io
 import math
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
@@ -73,12 +73,53 @@ class EstimateCompletionRequest(BaseModel):
     remainingSteps: int = 2
 
 
+class DelayPredictionRequest(BaseModel):
+    currentStatus: str = "Pending"
+    currentLocation: str | None = None
+    requiredDocuments: list[str] = Field(default_factory=list)
+    submittedDocuments: list[str] = Field(default_factory=list)
+    movementData: list[MovementEntry] = Field(default_factory=list)
+    departmentQueueLength: int = 0
+
+
+class BacktrackSuggestionRequest(BaseModel):
+    documentType: str | None = None
+    currentLocation: str | None = None
+    requiredDocuments: list[str] = Field(default_factory=list)
+    submittedDocuments: list[str] = Field(default_factory=list)
+    backtrackReason: str | None = None
+    movementData: list[MovementEntry] = Field(default_factory=list)
+
+
 def extract_text_from_image(image_bytes: bytes) -> str:
     reader = get_ocr_reader()
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     arr = np.array(image)
     results = reader.readtext(arr, detail=0, paragraph=True)
     return " ".join(str(r) for r in results)
+
+
+def classify_document(text: str) -> dict[str, Any]:
+    labels = {
+        "Certificate": ["certificate", "birth", "marriage", "registration"],
+        "Tax Receipt": ["tax", "receipt", "revenue", "payment"],
+        "Citizenship": ["citizenship", "citizen", "nationality", "id no"],
+        "Recommendation Letter": ["recommendation", "recommended", "ward chair", "letter"],
+        "Ward Form": ["ward", "form", "application", "municipality"],
+    }
+    normalized = text.lower()
+    scores = {
+        label: sum(1 for word in words if word in normalized)
+        for label, words in labels.items()
+    }
+    best_label = max(scores, key=scores.get) if scores else "Unknown"
+    best_score = scores.get(best_label, 0)
+    confidence = min(0.96, 0.35 + best_score * 0.18) if best_score else 0.28
+    return {
+        "documentType": best_label if best_score else "Unknown",
+        "classificationConfidence": round(confidence, 2),
+        "scores": scores,
+    }
 
 
 def check_keywords(text: str, keywords: list[str]) -> dict[str, Any]:
@@ -98,8 +139,13 @@ def check_keywords(text: str, keywords: list[str]) -> dict[str, Any]:
     return {
         "foundKeywords": found,
         "missingKeywords": missing,
+        "highlightedMissingItems": [
+            {"keyword": kw, "message": f"{kw} was not detected in the uploaded document."}
+            for kw in missing
+        ],
         "completenessScore": round(completeness, 2),
         "isComplete": len(missing) == 0,
+        "ocrConfidence": round(0.55 + completeness * 0.4, 2),
     }
 
 
@@ -207,8 +253,10 @@ async def analyze_document(
         return {"error": "No input provided"}
 
     result = check_keywords(text, keywords)
+    classification = classify_document(text)
     return {
         **result,
+        **classification,
         "extractedTextPreview": text[:500] if text else "",
         "keywordCount": len(keywords),
     }
@@ -247,6 +295,92 @@ def estimate_completion(request: EstimateCompletionRequest):
         remaining,
     )
     return result
+
+
+@app.post("/predict-delay")
+def predict_delay(request: DelayPredictionRequest):
+    """Lightweight ML-style prediction using engineered features.
+
+    The service keeps this deterministic for demos, but the feature shape mirrors
+    what a scikit-learn/XGBoost model would consume after enough training data is
+    collected from movement histories.
+    """
+    missing = sorted(set(request.requiredDocuments) - set(request.submittedDocuments))
+    backtrack_count = sum(1 for item in request.movementData if item.action.lower() == "backtracked")
+    age_hours = 0.0
+    if request.movementData:
+        ordered = sorted(request.movementData, key=lambda e: e.timestamp)
+        age_hours = (datetime.now(tz=ordered[0].timestamp.tzinfo) - ordered[0].timestamp).total_seconds() / 3600
+
+    risk_points = 12
+    risk_points += min(35, len(missing) * 12)
+    risk_points += min(20, backtrack_count * 10)
+    risk_points += min(18, request.departmentQueueLength * 2)
+    risk_points += 18 if request.currentStatus.lower() == "backtracked" else 0
+    risk_points += 12 if age_hours > 48 else 4 if age_hours > 24 else 0
+
+    delay_probability = min(96, risk_points)
+    expected_processing_hours = max(2, round(4 + request.departmentQueueLength * 0.6 + len(missing) * 3 + backtrack_count * 4))
+    confidence = "high" if len(request.movementData) >= 5 else "medium" if request.movementData else "low"
+
+    return {
+        "completionDate": (datetime.now() + timedelta(hours=expected_processing_hours)).isoformat(),
+        "delayProbability": delay_probability,
+        "expectedProcessingHours": expected_processing_hours,
+        "departmentDelay": request.currentLocation or "Unknown",
+        "confidenceScore": confidence,
+        "features": {
+            "missingDocumentCount": len(missing),
+            "backtrackCount": backtrack_count,
+            "departmentQueueLength": request.departmentQueueLength,
+            "fileAgeHours": round(age_hours, 1),
+        },
+    }
+
+
+@app.post("/smart-backtrack")
+def smart_backtrack(request: BacktrackSuggestionRequest):
+    missing = sorted(set(request.requiredDocuments) - set(request.submittedDocuments))
+    reason = request.backtrackReason or (
+        f"Missing {', '.join(missing)}" if missing else "Incomplete verification details"
+    )
+    recommended_department = "Reception"
+    if any("tax" in item.lower() for item in missing):
+        recommended_department = "Tax Desk"
+    elif any("citizen" in item.lower() for item in missing):
+        recommended_department = "Verification Desk"
+
+    similar_cases = sum(1 for item in request.movementData if item.action.lower() == "backtracked")
+
+    return {
+        "possibleReason": reason,
+        "missingDocuments": missing,
+        "requiredCorrections": [
+            f"Attach or re-upload {doc}." for doc in missing
+        ] or ["Add a clear officer note and verify citizen details."],
+        "historicalSimilarCases": similar_cases,
+        "recommendedDepartment": recommended_department,
+        "recommendation": f"Return to {recommended_department} with a citizen-friendly correction note.",
+        "confidence": "high" if missing else "medium",
+    }
+
+
+@app.post("/citizen-message")
+def citizen_message(request: DelayPredictionRequest):
+    prediction = predict_delay(request)
+    location = request.currentLocation or "the responsible section"
+    if request.currentStatus.lower() == "backtracked":
+        message = "Your application needs one correction before it can continue."
+    elif prediction["delayProbability"] > 65:
+        message = f"Your application is under review in {location}. It may take a little longer than usual."
+    else:
+        message = f"Your application is currently under review in {location}."
+
+    return {
+        "message": message,
+        "estimatedCompletion": f"Estimated completion within {max(1, round(prediction['expectedProcessingHours'] / 8))} working day(s).",
+        "missingDocuments": sorted(set(request.requiredDocuments) - set(request.submittedDocuments)),
+    }
 
 
 @app.post("/bottleneck-analysis")

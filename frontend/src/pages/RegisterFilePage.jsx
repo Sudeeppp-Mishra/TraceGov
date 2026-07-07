@@ -15,7 +15,12 @@ export default function RegisterFilePage() {
   const [loading, setLoading] = useState(false);
 
   function update(field) {
-    return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+    return (e) => {
+      const value = field === 'citizenPhone'
+        ? e.target.value.replace(/\D/g, '').slice(0, 10)
+        : e.target.value;
+      setForm((f) => ({ ...f, [field]: value }));
+    };
   }
 
   async function handleSubmit(e) {
@@ -23,6 +28,10 @@ export default function RegisterFilePage() {
     setLoading(true);
     setError('');
     try {
+      if (!/^\d{10}$/.test(form.citizenPhone)) {
+        throw new Error('Citizen number must be exactly 10 digits');
+      }
+
       const payload = {
         ...form,
         requiredDocuments: form.requiredDocuments
@@ -72,7 +81,14 @@ export default function RegisterFilePage() {
               <input
                 value={form[field]}
                 onChange={update(field)}
-                required={field !== 'citizenPhone'}
+                required
+                type={field === 'citizenPhone' ? 'tel' : 'text'}
+                inputMode={field === 'citizenPhone' ? 'numeric' : undefined}
+                pattern={field === 'citizenPhone' ? '[0-9]{10}' : undefined}
+                maxLength={field === 'citizenPhone' ? 10 : undefined}
+                minLength={field === 'citizenPhone' ? 10 : undefined}
+                placeholder={field === 'citizenPhone' ? '10 digit citizen number' : undefined}
+                title={field === 'citizenPhone' ? 'Citizen number must be exactly 10 digits' : undefined}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
               />
             </div>

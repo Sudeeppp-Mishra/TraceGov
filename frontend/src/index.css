@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-ward-green: #1a5f4a;
   --color-ward-green-light: #2d8f6f;
@@ -10,4 +12,136 @@
 body {
   @apply bg-ward-cream text-gray-900 antialiased;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+.dark [class~="bg-ward-cream"],
+.dark [class~="bg-slate-100"] {
+  background-color: #020617;
+}
+
+.dark [class~="bg-white"],
+.dark [class~="bg-white/90"],
+.dark [class~="bg-white/85"],
+.dark [class~="bg-white/80"],
+.dark [class~="bg-white/75"],
+.dark [class~="bg-slate-50"] {
+  background-color: #0f172a;
+}
+
+.dark [class~="bg-slate-100"] {
+  background-color: #1e293b;
+}
+
+.dark [class~="bg-blue-50"],
+.dark [class~="bg-blue-100"] {
+  background-color: #172554;
+}
+
+.dark [class~="bg-green-50"],
+.dark [class~="bg-green-100"] {
+  background-color: #052e16;
+}
+
+.dark [class~="bg-orange-50"],
+.dark [class~="bg-orange-100"] {
+  background-color: #431407;
+}
+
+.dark [class~="bg-red-50"],
+.dark [class~="bg-red-100"] {
+  background-color: #450a0a;
+}
+
+.dark [class~="border-white"],
+.dark [class~="border-white/70"],
+.dark [class~="border-slate-100"],
+.dark [class~="border-slate-200"],
+.dark [class~="border-gray-200"],
+.dark [class~="border-gray-300"] {
+  border-color: #334155;
+}
+
+.dark [class~="border-blue-100"],
+.dark [class~="border-blue-200"] {
+  border-color: #1e3a8a;
+}
+
+.dark [class~="border-green-100"],
+.dark [class~="border-green-200"] {
+  border-color: #166534;
+}
+
+.dark [class~="border-orange-100"],
+.dark [class~="border-orange-200"] {
+  border-color: #9a3412;
+}
+
+.dark [class~="border-red-100"],
+.dark [class~="border-red-200"] {
+  border-color: #991b1b;
+}
+
+.dark [class~="text-slate-950"],
+.dark [class~="text-slate-900"],
+.dark [class~="text-slate-800"],
+.dark [class~="text-gray-900"] {
+  color: #f8fafc;
+}
+
+.dark [class~="text-slate-700"],
+.dark [class~="text-slate-600"],
+.dark [class~="text-gray-600"] {
+  color: #cbd5e1;
+}
+
+.dark [class~="text-slate-500"],
+.dark [class~="text-gray-500"] {
+  color: #94a3b8;
+}
+
+.dark [class~="text-blue-950"],
+.dark [class~="text-blue-900"],
+.dark [class~="text-blue-800"],
+.dark [class~="text-blue-700"] {
+  color: #bfdbfe;
+}
+
+.dark [class~="text-green-950"],
+.dark [class~="text-green-900"],
+.dark [class~="text-green-800"],
+.dark [class~="text-green-700"],
+.dark [class~="text-green-600"] {
+  color: #bbf7d0;
+}
+
+.dark [class~="text-orange-950"],
+.dark [class~="text-orange-900"],
+.dark [class~="text-orange-800"],
+.dark [class~="text-orange-700"] {
+  color: #fed7aa;
+}
+
+.dark [class~="text-red-950"],
+.dark [class~="text-red-900"],
+.dark [class~="text-red-800"],
+.dark [class~="text-red-700"],
+.dark [class~="text-red-600"] {
+  color: #fecaca;
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: #020617;
+  border-color: #334155;
+  color: #f8fafc;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b;
 }

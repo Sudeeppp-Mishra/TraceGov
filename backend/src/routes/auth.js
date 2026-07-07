@@ -44,11 +44,15 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body;
 
     const user = await User.findOne({ email: email?.toLowerCase() }).select('+passwordHash');
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    if (role && user.role !== role) {
+      return res.status(403).json({ error: `This account is registered as ${user.role}. Please choose ${user.role} login.` });
     }
 
     const token = jwt.sign(

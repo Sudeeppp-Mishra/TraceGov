@@ -9,6 +9,24 @@ import { generateQrCode, parseQrPayload } from '../utils/qr.js';
 
 const router = Router();
 
+function startOfToday() {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function minutesBetween(a, b) {
+  return Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000));
+}
+
+function riskFromAgeAndStatus(file) {
+  const ageHours = (Date.now() - new Date(file.updatedAt).getTime()) / 36e5;
+  if (file.currentStatus === 'Backtracked') return { label: 'High', score: 86 };
+  if (ageHours > 48) return { label: 'High', score: 78 };
+  if (ageHours > 24 || file.currentStatus === 'Pending') return { label: 'Medium', score: 52 };
+  return { label: 'Low', score: 18 };
+}
+
 /** Register a new physical file and generate QR-Handshake payload */
 router.post('/register', authenticate, authorize('officer', 'admin'), async (req, res) => {
   try {
@@ -21,10 +39,16 @@ router.post('/register', authenticate, authorize('officer', 'admin'), async (req
       internalNotes,
     } = req.body;
 
-    if (!title || !citizenName || !documentType) {
+    const cleanCitizenPhone = citizenPhone?.trim();
+
+    if (!title || !citizenName || !cleanCitizenPhone || !documentType) {
       return res.status(400).json({
-        error: 'title, citizenName, and documentType are required',
+        error: 'title, citizenName, citizenPhone, and documentType are required',
       });
+    }
+
+    if (!/^\d{10}$/.test(cleanCitizenPhone)) {
+      return res.status(400).json({ error: 'Citizen number must be exactly 10 digits' });
     }
 
     const fileUid = generateFileUid();
@@ -39,7 +63,7 @@ router.post('/register', authenticate, authorize('officer', 'admin'), async (req
       trackingId,
       title,
       citizenName,
-      citizenPhone,
+      citizenPhone: cleanCitizenPhone,
       documentType,
       wardCode,
       currentStatus: 'Received',
@@ -74,6 +98,141 @@ router.post('/register', authenticate, authorize('officer', 'admin'), async (req
     });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Officer/Admin dashboard summary for operational and AI views */
+router.get('/dashboard/summary', authenticate, authorize('officer', 'admin'), async (req, res) => {
+  try {
+    const wardCode = req.query.wardCode || req.user.wardCode;
+    const today = startOfToday();
+    const baseFilter = req.user.role === 'admin' && req.query.allWards === 'true' ? {} : { wardCode };
+
+    const [
+      statusCounts,
+      todayFiles,
+      recentFiles,
+      recentHistory,
+      departmentQueue,
+      officerStats,
+      completedMovements,
+      backtracks,
+    ] = await Promise.all([
+      File.aggregate([
+        { $match: { ...baseFilter, isClosed: false } },
+        { $group: { _id: '$currentStatus', count: { $sum: 1 } } },
+      ]),
+      File.countDocuments({ ...baseFilter, createdAt: { $gte: today } }),
+      File.find({ ...baseFilter, isClosed: false })
+        .sort({ updatedAt: -1 })
+        .limit(8)
+        .populate('assignedOfficerId', 'name deskLocation')
+        .select('fileUid title citizenName documentType currentStatus currentLocation updatedAt createdAt requiredDocuments')
+        .lean(),
+      MovementHistory.find({})
+        .sort({ timestamp: -1 })
+        .limit(12)
+        .populate('fileId', 'fileUid title wardCode currentStatus')
+        .populate('officerId', 'name deskLocation')
+        .select('fileId officerId actionType currentLocation previousLocation timestamp notes backtrackReason')
+        .lean(),
+      File.aggregate([
+        { $match: { ...baseFilter, isClosed: false } },
+        { $group: { _id: '$currentLocation', count: { $sum: 1 }, pending: { $sum: { $cond: [{ $eq: ['$currentStatus', 'Pending'] }, 1, 0] } } } },
+        { $sort: { count: -1 } },
+      ]),
+      MovementHistory.aggregate([
+        { $match: { timestamp: { $gte: today } } },
+        { $group: { _id: '$officerId', processed: { $sum: 1 }, backtracked: { $sum: { $cond: [{ $eq: ['$actionType', 'Backtracked'] }, 1, 0] } } } },
+        { $sort: { processed: -1 } },
+        { $limit: 6 },
+        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'officer' } },
+        { $unwind: { path: '$officer', preserveNullAndEmptyArrays: true } },
+        { $project: { processed: 1, backtracked: 1, name: '$officer.name', deskLocation: '$officer.deskLocation' } },
+      ]),
+      MovementHistory.find({ actionType: { $in: ['Approved', 'Dispatched'] } })
+        .sort({ timestamp: -1 })
+        .limit(100)
+        .populate('fileId', 'createdAt wardCode')
+        .select('fileId timestamp')
+        .lean(),
+      MovementHistory.countDocuments({ actionType: 'Backtracked', timestamp: { $gte: today } }),
+    ]);
+
+    const counts = statusCounts.reduce((acc, item) => ({ ...acc, [item._id]: item.count }), {});
+    const completedSamples = completedMovements
+      .filter((item) => item.fileId?.createdAt)
+      .map((item) => minutesBetween(item.fileId.createdAt, item.timestamp));
+    const averageProcessingMinutes = completedSamples.length
+      ? Math.round(completedSamples.reduce((sum, value) => sum + value, 0) / completedSamples.length)
+      : 0;
+
+    const queueTotal = departmentQueue.reduce((sum, item) => sum + item.count, 0);
+    const busiestDepartment = departmentQueue[0]?._id || 'Reception';
+    const utilization = queueTotal ? Math.min(0.96, departmentQueue[0].count / Math.max(queueTotal, 1) + 0.22) : 0.28;
+    const arrivalRate = Math.max(0.2, Number((todayFiles / Math.max(1, (Date.now() - today.getTime()) / 36e5)).toFixed(2)));
+    const serviceRate = Number(Math.max(arrivalRate + 0.35, arrivalRate / Math.max(utilization, 0.2)).toFixed(2));
+
+    const enrichedFiles = recentFiles.map((file) => {
+      const risk = riskFromAgeAndStatus(file);
+      const missingDocuments = (file.requiredDocuments || []).filter((doc) => /tax|citizen|recommendation|certificate/i.test(doc)).slice(0, 2);
+      return {
+        ...file,
+        ai: {
+          risk,
+          missingDocuments,
+          citizenMessage: file.currentStatus === 'Backtracked'
+            ? 'Your file needs a correction before it can continue.'
+            : `Your application is currently under review in ${file.currentLocation}.`,
+          estimatedCompletionHours: Math.max(2, Math.round((risk.score / 20) + departmentQueue.length)),
+          predictionConfidence: risk.score > 70 ? 'medium' : 'high',
+        },
+      };
+    });
+
+    res.json({
+      wardCode,
+      generatedAt: new Date().toISOString(),
+      metrics: {
+        todaysFiles: todayFiles,
+        pendingFiles: counts.Pending || 0,
+        approvedFiles: counts.Approved || 0,
+        rejectedFiles: counts.Backtracked || 0,
+        completedFiles: (counts.Dispatched || 0) + (counts.Approved || 0),
+        averageProcessingMinutes,
+        averageQueueLength: queueTotal ? Number((queueTotal / Math.max(departmentQueue.length, 1)).toFixed(1)) : 0,
+        backtrackingToday: backtracks,
+      },
+      queuePrediction: {
+        arrivalRate,
+        serviceRate,
+        utilization: Number((arrivalRate / serviceRate).toFixed(2)),
+        expectedWaitingMinutes: Math.round(60 / Math.max(serviceRate - arrivalRate, 0.25)),
+        averageQueueLength: queueTotal ? Number((queueTotal / Math.max(departmentQueue.length, 1)).toFixed(1)) : 0,
+        predictionConfidence: recentHistory.length > 5 ? 'high' : 'medium',
+      },
+      ai: {
+        bottleneckDepartment: busiestDepartment,
+        delayProbability: utilization > 0.8 ? 72 : utilization > 0.55 ? 44 : 18,
+        riskScore: Math.round(utilization * 100),
+        missingDocumentAlerts: enrichedFiles.reduce((sum, file) => sum + file.ai.missingDocuments.length, 0),
+        recommendation: utilization > 0.8
+          ? `Move one officer to ${busiestDepartment} for the next working session.`
+          : 'Queue is stable. Keep scanning at each handoff for better predictions.',
+      },
+      departmentQueue,
+      officerStats,
+      recentFiles: enrichedFiles,
+      recentHistory,
+      notifications: enrichedFiles.slice(0, 5).map((file) => ({
+        id: file._id,
+        title: file.currentStatus === 'Backtracked' ? 'Returned file needs correction' : 'File updated',
+        message: `${file.fileUid} is now at ${file.currentLocation}`,
+        severity: file.currentStatus === 'Backtracked' ? 'alert' : file.currentStatus === 'Pending' ? 'pending' : 'success',
+      })),
+    });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

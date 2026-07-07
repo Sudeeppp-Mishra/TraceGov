@@ -19,8 +19,8 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  login: (email, password) =>
-    request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  login: (email, password, role) =>
+    request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, role }) }),
 
   register: (payload) =>
     request('/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
@@ -39,6 +39,11 @@ export const api = {
   backtrackFile: (id, payload) =>
     request(`/files/${id}/backtrack`, { method: 'POST', body: JSON.stringify(payload) }),
 
+  dashboardSummary: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/files/dashboard/summary${qs ? `?${qs}` : ''}`);
+  },
+
   searchFiles: (params) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/files/search?${qs}`);
@@ -51,6 +56,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ trackingId }),
     }),
+
+  analyzeDocument: (payload) =>
+    request('/ai/analyze-document', { method: 'POST', body: JSON.stringify(payload) }),
+
+  predictDelay: (payload) =>
+    request('/ai/predict-delay', { method: 'POST', body: JSON.stringify(payload) }),
+
+  smartBacktrack: (payload) =>
+    request('/ai/smart-backtrack', { method: 'POST', body: JSON.stringify(payload) }),
 };
 
 export function saveSession(token, user) {

@@ -1,22 +1,31 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, saveSession } from '../lib/api';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialRole = searchParams.get('role') === 'admin' ? 'admin' : 'officer';
+  const [loginRole, setLoginRole] = useState(initialRole);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  function handleRoleChange(role) {
+    setLoginRole(role);
+    setSearchParams({ role });
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      const { token, user } = await api.login(email, password);
+      const { token, user } = await api.login(email, password, loginRole);
       saveSession(token, user);
       if (user.role === 'citizen') navigate('/track');
+      else if (user.role === 'admin') navigate('/admin');
       else navigate('/officer');
     } catch (err) {
       setError(err.message);
@@ -35,6 +44,26 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-md p-8 space-y-5">
           <div>
+            <label className="block text-sm font-medium mb-2">Login As</label>
+            <div className="grid grid-cols-2 rounded-xl border border-gray-200 bg-gray-50 p-1">
+              {['officer', 'admin'].map((role) => (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => handleRoleChange(role)}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold capitalize ${
+                    loginRole === role
+                      ? 'bg-white text-ward-green shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {role}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
             <label className="block text-sm font-medium mb-1">Email</label>
             <input
               type="email"
@@ -42,7 +71,7 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
               className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:ring-2 focus:ring-ward-green focus:border-transparent"
-              placeholder="officer@ward.gov.np"
+              placeholder={loginRole === 'admin' ? 'admin@ward.gov.np' : 'officer@ward.gov.np'}
             />
           </div>
           <div>

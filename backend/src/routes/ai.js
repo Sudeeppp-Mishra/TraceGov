@@ -5,17 +5,20 @@ import { MovementHistory } from '../models/MovementHistory.js';
 const router = Router();
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 
+async function proxyToAi(path, body, res) {
+  const response = await fetch(`${AI_SERVICE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  res.status(response.status).json(data);
+}
+
 /** Proxy document OCR analysis to AI microservice */
 router.post('/analyze-document', authenticate, authorize('officer', 'admin'), async (req, res) => {
   try {
-    const response = await fetch(`${AI_SERVICE_URL}/analyze-document`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body),
-    });
-
-    const data = await response.json();
-    res.status(response.status).json(data);
+    await proxyToAi('/analyze-document', req.body, res);
   } catch (err) {
     res.status(502).json({ error: `AI service unavailable: ${err.message}` });
   }
@@ -46,14 +49,31 @@ router.post('/estimate-completion', async (req, res) => {
       }));
     }
 
-    const response = await fetch(`${AI_SERVICE_URL}/estimate-completion`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...req.body, movementData }),
-    });
+    await proxyToAi('/estimate-completion', { ...req.body, movementData }, res);
+  } catch (err) {
+    res.status(502).json({ error: `AI service unavailable: ${err.message}` });
+  }
+});
 
-    const data = await response.json();
-    res.status(response.status).json(data);
+router.post('/predict-delay', authenticate, authorize('officer', 'admin'), async (req, res) => {
+  try {
+    await proxyToAi('/predict-delay', req.body, res);
+  } catch (err) {
+    res.status(502).json({ error: `AI service unavailable: ${err.message}` });
+  }
+});
+
+router.post('/smart-backtrack', authenticate, authorize('officer', 'admin'), async (req, res) => {
+  try {
+    await proxyToAi('/smart-backtrack', req.body, res);
+  } catch (err) {
+    res.status(502).json({ error: `AI service unavailable: ${err.message}` });
+  }
+});
+
+router.post('/citizen-message', async (req, res) => {
+  try {
+    await proxyToAi('/citizen-message', req.body, res);
   } catch (err) {
     res.status(502).json({ error: `AI service unavailable: ${err.message}` });
   }

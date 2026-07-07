@@ -1,49 +1,69 @@
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
-import mongoose from 'mongoose';
-import { User } from '../src/models/User.js';
+import { connectDatabase, disconnectDatabase } from '../src/config/db.js';
+import { User, ROLES } from '../src/models/User.js';
 
+// Load environment configuration
 dotenv.config();
 
-const DEMO_OFFICER = {
-  name: 'Demo Officer',
-  email: 'officer@ward.gov.np',
-  password: 'officer123',
-  role: 'officer',
-  wardCode: 'W01',
-  deskLocation: 'Reception',
-};
+const SEED_USERS = [
+  {
+    name: 'Demo Officer',
+    email: 'officer@ward.gov.np',
+    password: 'officer123',
+    role: ROLES.OFFICER,
+    wardCode: 'W01',
+    deskLocation: 'Reception',
+  },
+  {
+    name: 'Ward Admin',
+    email: 'admin@ward.gov.np',
+    password: 'admin123',
+    role: ROLES.ADMIN,
+    wardCode: 'W01',
+    deskLocation: 'Admin Office',
+  },
+];
 
-const DEMO_ADMIN = {
-  name: 'Ward Admin',
-  email: 'admin@ward.gov.np',
-  password: 'admin123',
-  role: 'admin',
-  wardCode: 'W01',
-  deskLocation: 'Admin Office',
-};
+async function seedDatabase() {
+  console.log('Seeder: Initializing database seeding operations...');
+  
+  // Connect to MongoDB
+  await connectDatabase();
 
-async function seed() {
-  const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/tracegov';
-  await mongoose.connect(uri);
+  try {
+    for (const seedUser of SEED_USERS) {
+      const emailLower = seedUser.email.toLowerCase();
+      const existingUser = await User.findOne({ email: emailLower });
 
-  for (const demo of [DEMO_OFFICER, DEMO_ADMIN]) {
-    const existing = await User.findOne({ email: demo.email });
-    if (existing) {
-      console.log(`Skipped (exists): ${demo.email}`);
-      continue;
+      if (existingUser) {
+        console.log(`Seeder: Account skipped (already exists): ${emailLower}`);
+        continue;
+      }
+
+      // Hash password and save user
+      const passwordHash = await bcrypt.hash(seedUser.password, 12);
+      
+      const { password, ...userFields } = seedUser;
+      await User.create({
+        ...userFields,
+        email: emailLower,
+        passwordHash,
+      });
+
+      console.log(`Seeder: Successfully registered account -> ${emailLower} | password: ${password}`);
     }
 
-    const passwordHash = await bcrypt.hash(demo.password, 12);
-    await User.create({ ...demo, passwordHash });
-    console.log(`Created: ${demo.email} / ${demo.password}`);
+    console.log('Seeder: Database seeding operations completed successfully.');
+  } catch (err) {
+    console.error(`Seeder: Error during execution: ${err.message}`);
+  } finally {
+    // Terminate Mongoose connection gracefully
+    await disconnectDatabase();
   }
-
-  await mongoose.disconnect();
-  console.log('Seed complete.');
 }
 
-seed().catch((err) => {
-  console.error(err);
+seedDatabase().catch((err) => {
+  console.error('Seeder: Critical failure encountered:', err);
   process.exit(1);
 });

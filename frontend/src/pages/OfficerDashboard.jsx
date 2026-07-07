@@ -1,424 +1,658 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import QrScanner from '../components/QrScanner';
-import FileActions from '../components/FileActions';
-import { api } from '../lib/api';
-import { getStoredUser, clearSession } from '../lib/api';
-
-const STATUS_STYLES = {
-  Received: 'bg-blue-100 text-blue-800 border-blue-200',
-  Pending: 'bg-orange-100 text-orange-800 border-orange-200',
-  Approved: 'bg-green-100 text-green-800 border-green-200',
-  Dispatched: 'bg-slate-100 text-slate-800 border-slate-200',
-  Backtracked: 'bg-red-100 text-red-800 border-red-200',
-};
-
-const riskStyles = {
-  Low: 'text-green-700 bg-green-50 border-green-200',
-  Medium: 'text-orange-700 bg-orange-50 border-orange-200',
-  High: 'text-red-700 bg-red-50 border-red-200',
-};
-
-function formatMinutes(minutes) {
-  if (!minutes) return 'No sample';
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.round(minutes / 60)}h`;
-}
-
-function StatCard({ label, value, tone = 'blue', hint }) {
-  const tones = {
-    blue: 'from-blue-600 to-cyan-500',
-    green: 'from-green-600 to-emerald-500',
-    orange: 'from-orange-500 to-amber-400',
-    red: 'from-red-600 to-rose-500',
-    slate: 'from-slate-700 to-slate-500',
-  };
-
-  return (
-    <div className="rounded-2xl border border-white/70 bg-white/85 p-5 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/80">
-      <div className={`mb-4 h-1.5 w-16 rounded-full bg-gradient-to-r ${tones[tone]}`} />
-      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
-      <p className="mt-2 text-3xl font-bold text-slate-950 dark:text-white">{value}</p>
-      {hint && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
-    </div>
-  );
-}
-
-function SkeletonCard() {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="h-3 w-20 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
-      <div className="mt-4 h-8 w-28 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
-      <div className="mt-4 h-2 w-full animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
-    </div>
-  );
-}
-
-function QueueBar({ item, max }) {
-  const width = max ? `${Math.max(8, (item.count / max) * 100)}%` : '8%';
-  return (
-    <div>
-      <div className="mb-1 flex items-center justify-between text-sm">
-        <span className="font-medium text-slate-700 dark:text-slate-200">{item._id}</span>
-        <span className="text-slate-500 dark:text-slate-400">{item.count} files</span>
-      </div>
-      <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800">
-        <div className="h-2 rounded-full bg-blue-600" style={{ width }} />
-      </div>
-    </div>
-  );
-}
-
-function Timeline({ items = [] }) {
-  if (!items.length) {
-    return <p className="rounded-xl border border-dashed border-slate-300 p-5 text-sm text-slate-500 dark:border-slate-700">No movement history yet.</p>;
-  }
-
-  return (
-    <ol className="relative ml-3 space-y-5 border-l border-blue-200 dark:border-blue-900">
-      {items.map((entry) => (
-        <li key={entry._id} className="ml-5">
-          <span className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border-2 border-white bg-blue-600 dark:border-slate-950" />
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-900 dark:text-white">{entry.actionType}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {entry.currentLocation} · {entry.officerId?.name || 'System'}
-              </p>
-              {(entry.notes || entry.backtrackReason) && (
-                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{entry.backtrackReason || entry.notes}</p>
-              )}
-            </div>
-            <time className="text-xs text-slate-400">{new Date(entry.timestamp).toLocaleString()}</time>
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
-}
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Html5Qrcode } from 'html5-qrcode';
+import { api, getStoredUser, clearSession } from '../lib/api';
+import { Container, Card, Button, Input, Select, Badge, Modal, Icons } from '../components/ui';
 
 export default function OfficerDashboard() {
-  const user = getStoredUser();
-  const [scanning, setScanning] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [summaryLoading, setSummaryLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [summaryError, setSummaryError] = useState('');
-  const [result, setResult] = useState(null);
-  const [summary, setSummary] = useState(null);
-  const [manualUid, setManualUid] = useState('');
-  const [query, setQuery] = useState('');
+  const navigate = useNavigate();
+  const [currentUser, setCurrentUser] = useState(null);
+  const [metrics, setMetrics] = useState(null);
+  const [departmentQueue, setDepartmentQueue] = useState([]);
+  const [recentFiles, setRecentFiles] = useState([]);
+  const [recentHistory, setRecentHistory] = useState([]);
+  const [officers, setOfficers] = useState([]);
+
+  // Search and selection states
+  const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFileHistory, setSelectedFileHistory] = useState([]);
+  const [isAuditValid, setIsAuditValid] = useState(true);
 
-  const loadSummary = useCallback(async () => {
-    setSummaryLoading(true);
-    setSummaryError('');
-    try {
-      setSummary(await api.dashboardSummary());
-    } catch (err) {
-      setSummaryError(err.message);
-    } finally {
-      setSummaryLoading(false);
-    }
-  }, []);
+  // Form inputs for file routing actions
+  const [actionTab, setActionTab] = useState('forward'); // 'forward' | 'backtrack' | 'ai'
+  const [nextLocation, setNextLocation] = useState('');
+  const [routingNotes, setRoutingNotes] = useState('');
+  const [backtrackLocation, setBacktrackLocation] = useState('');
+  const [backtrackReason, setBacktrackReason] = useState('');
+  const [internalNotes, setInternalNotes] = useState('');
 
+  // AI-assisted panel states
+  const [aiDelayReport, setAiDelayReport] = useState(null);
+  const [aiBacktrackSuggest, setAiBacktrackSuggest] = useState(null);
+  const [checkingAi, setCheckingAi] = useState(false);
+
+  // Scanner modal states
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const qrScannerRef = useRef(null);
+  const [scannerError, setScannerError] = useState('');
+
+  // General control states
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // Load profile and dashboard stats
   useEffect(() => {
-    loadSummary();
-  }, [loadSummary]);
-
-  useEffect(() => {
-    function handleKey(e) {
-      if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
-        e.preventDefault();
-        document.getElementById('quick-search')?.focus();
-      }
-      if (e.key.toLowerCase() === 's' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        setScanning(true);
-      }
+    const user = getStoredUser();
+    if (!user) {
+      navigate('/login');
+      return;
     }
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, []);
+    setCurrentUser(user);
+    loadDashboard(user.wardCode);
+  }, [navigate]);
 
-  const lookupFile = useCallback(async (identifier) => {
-    setLoading(true);
-    setError('');
-    setScanning(false);
+  // Load ward metrics
+  const loadDashboard = async (wardCode) => {
     try {
-      const data = await api.scanFile(identifier);
-      setResult(data);
+      setLoading(true);
+      const [summary, officersList] = await Promise.all([
+        api.dashboardSummary({ wardCode }),
+        api.getOfficers().catch(() => []),
+      ]);
+
+      setMetrics(summary.metrics);
+      setDepartmentQueue(summary.departmentQueue || []);
+      setRecentFiles(summary.recentFiles || []);
+      setRecentHistory(summary.recentHistory || []);
+      setOfficers(officersList);
     } catch (err) {
-      setError(err.message);
-      setResult(null);
+      console.error('Failed to load dashboard metrics:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
 
+  // Real-time search query dispatch
   useEffect(() => {
-    const handle = setTimeout(async () => {
-      if (query.trim().length < 2) {
-        setSearchResults([]);
-        return;
-      }
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
       try {
-        const data = await api.searchFiles({ q: query.trim(), limit: 6 });
-        setSearchResults(data.files || []);
-      } catch {
-        setSearchResults([]);
+        const response = await api.searchFiles({ q: searchQuery });
+        setSearchResults(response.files || []);
+      } catch (err) {
+        console.error(err);
       }
-    }, 250);
-    return () => clearTimeout(handle);
-  }, [query]);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-  const maxQueue = useMemo(
-    () => Math.max(...(summary?.departmentQueue || []).map((item) => item.count), 1),
-    [summary]
-  );
+  // Select file and check details (QR scanner target or search selection)
+  const handleSelectFile = async (identifier) => {
+    try {
+      setLoading(true);
+      const data = await api.scanFile(identifier);
+      setSelectedFile(data.file);
+      setSelectedFileHistory(data.recentHistory || []);
+      setIsAuditValid(data.auditChainValid);
+      
+      // Auto fill location dropdown defaults
+      setNextLocation('');
+      setBacktrackLocation('');
+      setRoutingNotes('');
+      setBacktrackReason('');
+      setInternalNotes('');
+      setAiDelayReport(null);
+      setAiBacktrackSuggest(null);
+      
+      // Reset search
+      setSearchQuery('');
+      setSearchResults([]);
+    } catch (err) {
+      alert(err.message || 'Error loading file properties');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  function handleActionComplete() {
-    if (result?.file?.fileUid) lookupFile(result.file.fileUid);
-    loadSummary();
-  }
+  // Fetch AI risk predictions & backtracking hints
+  const checkAiInsights = async () => {
+    if (!selectedFile) return;
+    setCheckingAi(true);
+    try {
+      const activeQueue = departmentQueue.find((q) => q._id === selectedFile.currentLocation);
+      const queueLength = activeQueue ? activeQueue.count : 0;
 
-  const metrics = summary?.metrics || {};
-  const prediction = summary?.queuePrediction || {};
+      const [delayReport, backtrackReport] = await Promise.all([
+        api.predictDelay({
+          currentStatus: selectedFile.currentStatus,
+          currentLocation: selectedFile.currentLocation,
+          requiredDocuments: selectedFile.requiredDocuments || [],
+          submittedDocuments: selectedFile.requiredDocuments || [], // Mock checklist verification
+          movementData: selectedFileHistory.map((h) => ({ action: h.actionType, timestamp: h.timestamp })),
+          departmentQueueLength: queueLength,
+        }).catch(() => null),
+        api.smartBacktrack({
+          documentType: selectedFile.documentType,
+          currentLocation: selectedFile.currentLocation,
+          requiredDocuments: selectedFile.requiredDocuments || [],
+          submittedDocuments: [], // Bypassed checklist items
+          movementData: selectedFileHistory.map((h) => ({ action: h.actionType, timestamp: h.timestamp })),
+        }).catch(() => null),
+      ]);
+
+      setAiDelayReport(delayReport);
+      setAiBacktrackSuggest(backtrackReport);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCheckingAi(false);
+    }
+  };
+
+  // Trigger file forward routing Action
+  const handleForwardFile = async (e) => {
+    e.preventDefault();
+    if (!nextLocation) return;
+
+    setActionLoading(true);
+    try {
+      await api.forwardFile(selectedFile.id, {
+        nextLocation,
+        notes: routingNotes.trim(),
+      });
+      
+      // Reload dashboard metrics and refresh active selected file details
+      await loadDashboard(currentUser.wardCode);
+      await handleSelectFile(selectedFile.fileUid);
+    } catch (err) {
+      alert(err.message || 'Forward routing failed');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Trigger file backtrack routing Action
+  const handleBacktrackFile = async (e) => {
+    e.preventDefault();
+    if (!backtrackLocation || !backtrackReason.trim()) return;
+
+    setActionLoading(true);
+    try {
+      await api.backtrackFile(selectedFile.id, {
+        returnLocation: backtrackLocation,
+        backtrackReason: backtrackReason.trim(),
+        internalNotes: internalNotes.trim(),
+      });
+      
+      await loadDashboard(currentUser.wardCode);
+      await handleSelectFile(selectedFile.fileUid);
+    } catch (err) {
+      alert(err.message || 'Backtrack routing failed');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Start Webcam QR scanner instance
+  const startCameraScanner = () => {
+    setIsScannerOpen(true);
+    setScannerError('');
+    
+    // Set slight delay for element query reference
+    setTimeout(() => {
+      const html5QrCode = new Html5Qrcode('qr-reader-container');
+      qrScannerRef.current = html5QrCode;
+
+      html5QrCode.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        (decodedText) => {
+          // Success: stop scanner, close modal, and select file
+          stopCameraScanner();
+          handleSelectFile(decodedText);
+        },
+        (errorMessage) => {
+          // Camera scanner verboses log continuously, ignore
+        }
+      ).catch((err) => {
+        setScannerError('Could not initialize camera feed. Please check hardware permissions.');
+      });
+    }, 300);
+  };
+
+  // Close & clean camera assets
+  const stopCameraScanner = () => {
+    setIsScannerOpen(false);
+    if (qrScannerRef.current) {
+      qrScannerRef.current.stop().then(() => {
+        qrScannerRef.current = null;
+      }).catch((err) => console.error(err));
+    }
+  };
+
+  // Log out session
+  const handleLogout = () => {
+    clearSession();
+    navigate('/login');
+  };
+
+  const deskOptions = useMemo(() => [
+    'Reception',
+    'Verification Desk',
+    'Ward Chair Section',
+    'Tax Office Desk',
+    'Administrative Archives',
+    'Review Panel Office',
+  ], []);
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-950 transition-colors dark:bg-slate-950 dark:text-white">
-        <header className="sticky top-0 z-20 border-b border-white/70 bg-white/85 px-4 py-3 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700 dark:text-blue-300">TraceGov</p>
-              <h1 className="text-xl font-bold">Officer Command Center</h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">{user?.name} · {user?.deskLocation || 'Government Desk'}</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Link to="/ai" className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
-                AI Insights
-              </Link>
-              {user?.role === 'admin' && (
-                <Link to="/admin" className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:border-blue-300 dark:border-slate-700 dark:bg-slate-900">
-                  Admin
-                </Link>
-              )}
-              <Link to="/register-file" className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-800">
-                Register File
-              </Link>
-              <button
-                type="button"
-                onClick={() => { clearSession(); window.location.href = '/login'; }}
-                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:text-slate-950 dark:border-slate-700 dark:text-slate-300"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-        </header>
-
-        <main className="mx-auto max-w-7xl px-4 py-6">
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            {summaryLoading ? (
-              Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)
-            ) : (
-              <>
-                <StatCard label="Today's Files" value={metrics.todaysFiles || 0} tone="blue" hint="New registrations" />
-                <StatCard label="Pending Files" value={metrics.pendingFiles || 0} tone="orange" hint="Waiting in department queues" />
-                <StatCard label="Approved Files" value={metrics.approvedFiles || 0} tone="green" hint="Cleared by officers" />
-                <StatCard label="Backtracked" value={metrics.rejectedFiles || 0} tone="red" hint={`${metrics.backtrackingToday || 0} returned today`} />
-                <StatCard label="Avg Processing" value={formatMinutes(metrics.averageProcessingMinutes)} tone="slate" hint="From recent completed files" />
-              </>
+    <div className="min-h-screen bg-background text-foreground transition-colors pb-16">
+      
+      {/* Officer header nav */}
+      <header className="border-b border-border bg-card/65 backdrop-blur-md sticky top-0 z-40">
+        <Container className="flex h-16 items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="h-6 w-1 bg-teal-600 rounded-full" />
+            <h1 className="text-sm font-semibold uppercase tracking-wider text-foreground">TraceGov Terminal</h1>
+            {currentUser && (
+              <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground uppercase">
+                Ward {currentUser.wardCode} · {currentUser.deskLocation}
+              </span>
             )}
-          </section>
+          </div>
 
-          {summaryError && (
-            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{summaryError}</div>
+          <div className="flex items-center gap-4">
+            <Link to="/register-file" className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-all">
+              Register File
+            </Link>
+            <Link to="/ai" className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-all">
+              AI Insights
+            </Link>
+            {currentUser?.role === 'admin' && (
+              <Link to="/admin" className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-all">
+                Admin Panel
+              </Link>
+            )}
+            <button
+              onClick={handleLogout}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-red-500 hover:text-red-600 cursor-pointer"
+            >
+              <Icons.LogOut className="h-3.5 w-3.5" />
+              Sign Out
+            </button>
+          </div>
+        </Container>
+      </header>
+
+      <main className="mt-8">
+        <Container className="space-y-8">
+          
+          {/* Telemetry metrics row */}
+          {metrics && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card className="p-4.5 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">In Progress Queue</span>
+                  <span className="block text-2xl font-bold text-foreground mt-1">{metrics.pendingFiles}</span>
+                </div>
+                <Icons.Layers className="h-8 w-8 text-primary/10 shrink-0" />
+              </Card>
+              <Card className="p-4.5 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Registrations Today</span>
+                  <span className="block text-2xl font-bold text-foreground mt-1">{metrics.todaysFiles}</span>
+                </div>
+                <Icons.Sparkles className="h-8 w-8 text-primary/10 shrink-0" />
+              </Card>
+              <Card className="p-4.5 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Avg Processing Time</span>
+                  <span className="block text-2xl font-bold text-foreground mt-1">{metrics.averageProcessingMinutes}m</span>
+                </div>
+                <Icons.Clock className="h-8 w-8 text-primary/10 shrink-0" />
+              </Card>
+              <Card className="p-4.5 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Rejections Today</span>
+                  <span className="block text-2xl font-bold text-foreground mt-1">{metrics.backtrackingToday}</span>
+                </div>
+                <Icons.AlertCircle className="h-8 w-8 text-red-500/10 shrink-0" />
+              </Card>
+            </div>
           )}
 
-          <section className="mt-6 grid gap-6 xl:grid-cols-[1.35fr_0.9fr]">
-            <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold">QR Workflow</h2>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">Scan, inspect prediction, and move files from one screen.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setScanning(true)}
-                  className="rounded-xl bg-blue-700 px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-blue-800"
-                >
-                  Quick QR Scan
-                </button>
-              </div>
-
-              <form
-                className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]"
-                onSubmit={(e) => { e.preventDefault(); if (manualUid) lookupFile(manualUid); }}
-              >
-                <input
-                  value={manualUid}
-                  onChange={(e) => setManualUid(e.target.value)}
-                  placeholder="Enter File UID or scan payload"
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-                <button type="submit" className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold dark:border-slate-700">
-                  Lookup
-                </button>
-              </form>
-
-              {scanning && (
-                <div className="mt-5">
-                  <QrScanner active={scanning} onScan={lookupFile} onError={(msg) => { setError(msg); setScanning(false); }} />
-                  <button type="button" onClick={() => setScanning(false)} className="mt-3 text-sm font-medium text-slate-500 hover:text-slate-900 dark:hover:text-white">
-                    Cancel scan
-                  </button>
-                </div>
-              )}
-
-              {loading && <p className="mt-5 rounded-xl bg-blue-50 p-4 text-sm text-blue-700 dark:bg-blue-950 dark:text-blue-200">Loading file details...</p>}
-              {error && <p className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>}
-
-              {result?.file && (
-                <div className="mt-5 grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-950">
-                    <p className="font-mono text-xs text-slate-500">{result.file.fileUid}</p>
-                    <h3 className="mt-2 text-xl font-bold">{result.file.title}</h3>
-                    <p className="mt-1 text-sm text-slate-500">{result.file.citizenName} · {result.file.documentType}</p>
-                    <span className={`mt-4 inline-flex rounded-full border px-3 py-1 text-xs font-bold ${STATUS_STYLES[result.file.currentStatus]}`}>
-                      {result.file.currentStatus}
-                    </span>
-                    <div className="mt-5 grid gap-3 text-sm">
-                      <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
-                        <p className="text-slate-500">Current Department</p>
-                        <p className="font-semibold">{result.file.currentLocation}</p>
-                      </div>
-                      <div className="rounded-xl bg-white p-3 dark:bg-slate-900">
-                        <p className="text-slate-500">Current Officer</p>
-                        <p className="font-semibold">{result.file.assignedOfficer?.name || user?.name || 'Assigned desk'}</p>
-                      </div>
-                    </div>
-                    {result.auditChainValid === false && (
-                      <p className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700">Audit chain integrity warning</p>
-                    )}
+          {/* Quick search input */}
+          <div className="grid md:grid-cols-[1.2fr_0.8fr] gap-6 items-start">
+            <div className="space-y-6">
+              
+              {/* Search Box */}
+              <Card className="p-5 relative">
+                <div className="flex gap-3">
+                  <div className="relative flex-1">
+                    <Icons.Search className="absolute left-3 top-3.5 h-4.5 w-4.5 text-muted-foreground" />
+                    <input
+                      type="text"
+                      placeholder="Search files by Citizen Name, File Title, UID, or Tracking ID..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full rounded-lg border border-border bg-card py-3 pl-10 pr-4 text-sm text-foreground placeholder-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/10 outline-none transition-all"
+                    />
                   </div>
+                  <Button variant="outline" onClick={startCameraScanner} className="flex gap-2 shrink-0">
+                    <Icons.Scan className="h-4 w-4" />
+                    Scan Tag
+                  </Button>
+                </div>
 
-                  <div>
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      {['Estimated Completion', 'Risk Indicator', 'Missing Documents'].map((label, index) => (
-                        <div key={label} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-                          <p className="text-xs text-slate-500">{label}</p>
-                          <p className="mt-2 text-lg font-bold">
-                            {index === 0 && `${prediction.expectedWaitingMinutes || 45}m`}
-                            {index === 1 && (result.file.currentStatus === 'Backtracked' ? 'High' : 'Medium')}
-                            {index === 2 && (result.file.requiredDocuments?.length || 0)}
-                          </p>
+                {/* Instant suggestions list */}
+                {searchResults.length > 0 && (
+                  <div className="absolute left-5 right-5 mt-2 max-h-60 overflow-y-auto rounded-lg border border-border bg-card shadow-lg z-20 divide-y divide-border">
+                    {searchResults.map((file) => (
+                      <button
+                        key={file.fileUid}
+                        onClick={() => handleSelectFile(file.fileUid)}
+                        className="w-full text-left px-4 py-3 text-xs hover:bg-muted font-medium transition-colors flex items-center justify-between"
+                      >
+                        <div>
+                          <span className="font-mono text-[10px] text-muted-foreground">{file.fileUid}</span>
+                          <span className="block font-bold text-foreground mt-0.5">{file.title}</span>
+                          <span className="text-[10px] text-muted-foreground mt-0.5">{file.citizenName} · {file.currentLocation}</span>
+                        </div>
+                        <Badge status={file.currentStatus} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              {/* Selected File action deck */}
+              {selectedFile ? (
+                <div className="space-y-6 animate-in fade-in duration-200">
+                  <Card className="p-5 relative overflow-hidden">
+                    
+                    {/* Top title deck */}
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] text-muted-foreground">{selectedFile.fileUid}</span>
+                          {/* Ledger audit check badge */}
+                          <div className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold border ${isAuditValid ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'}`}>
+                            <Icons.ShieldCheck className="h-3 w-3" />
+                            {isAuditValid ? 'Ledger Verified' : 'Integrity Fail'}
+                          </div>
+                        </div>
+                        <h3 className="text-xl font-bold text-foreground mt-2">{selectedFile.title}</h3>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Citizen: <strong>{selectedFile.citizenName}</strong> · Phone: {selectedFile.citizenPhone}
+                        </p>
+                      </div>
+                      <Badge status={selectedFile.currentStatus} />
+                    </div>
+
+                    <hr className="border-border my-5" />
+
+                    {/* Action Panel Tabs */}
+                    <div className="flex border-b border-border mb-5">
+                      {['forward', 'backtrack', 'ai'].map((tab) => (
+                        <button
+                          key={tab}
+                          onClick={() => {
+                            setActionTab(tab);
+                            if (tab === 'ai' && !aiDelayReport) {
+                              checkAiInsights();
+                            }
+                          }}
+                          className={`pb-2.5 px-4 text-xs font-semibold uppercase tracking-wider border-b-2 transition-all cursor-pointer ${actionTab === tab ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+                        >
+                          {tab === 'forward' && 'Forward Desk'}
+                          {tab === 'backtrack' && 'Backtrack File'}
+                          {tab === 'ai' && 'AI Congestion Check'}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Forward form */}
+                    {actionTab === 'forward' && (
+                      <form onSubmit={handleForwardFile} className="space-y-4">
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <Select
+                            label="Target Department / Location"
+                            id="f_loc"
+                            value={nextLocation}
+                            onChange={(e) => setNextLocation(e.target.value)}
+                            required
+                          >
+                            <option value="">Choose department...</option>
+                            {deskOptions.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </Select>
+                          <Select
+                            label="Assign Desk Officer"
+                            id="f_off"
+                          >
+                            <option value="">Auto-Assign Section staff...</option>
+                            {officers.map((off) => (
+                              <option key={off.id} value={off.id}>{off.name} ({off.deskLocation})</option>
+                            ))}
+                          </Select>
+                        </div>
+                        <Input
+                          label="Redirection Log Notes"
+                          id="f_notes"
+                          placeholder="e.g. Verification complete, forwarding for final endorsement signature."
+                          value={routingNotes}
+                          onChange={(e) => setRoutingNotes(e.target.value)}
+                        />
+                        <div className="flex justify-end pt-2">
+                          <Button type="submit" variant="primary" disabled={actionLoading}>
+                            {actionLoading ? 'Routing...' : 'Confirm File Redirection'}
+                          </Button>
+                        </div>
+                      </form>
+                    )}
+
+                    {/* Backtrack form */}
+                    {actionTab === 'backtrack' && (
+                      <form onSubmit={handleBacktrackFile} className="space-y-4">
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <Select
+                            label="Return File Destination"
+                            id="b_loc"
+                            value={backtrackLocation}
+                            onChange={(e) => setBacktrackLocation(e.target.value)}
+                            required
+                          >
+                            <option value="">Choose destination...</option>
+                            {deskOptions.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </Select>
+                          <Input
+                            label="Rejection Correction Reason"
+                            id="b_reason"
+                            placeholder="e.g. Missing Ward Form Stamp / Verification failed."
+                            value={backtrackReason}
+                            onChange={(e) => setBacktrackReason(e.target.value)}
+                            required
+                          />
+                        </div>
+                        <Input
+                          label="Private Desk Staff Notes (Internal notes - hidden from citizens)"
+                          id="b_int"
+                          placeholder="e.g. Check citizen's ID match details against database entry records."
+                          value={internalNotes}
+                          onChange={(e) => setInternalNotes(e.target.value)}
+                        />
+                        <div className="flex justify-end pt-2">
+                          <Button type="submit" variant="danger" disabled={actionLoading}>
+                            {actionLoading ? 'Bouncing...' : 'Confirm Backtrack Loop'}
+                          </Button>
+                        </div>
+                      </form>
+                    )}
+
+                    {/* AI assisted congestion risk */}
+                    {actionTab === 'ai' && (
+                      <div className="space-y-5 animate-in fade-in-20 duration-150">
+                        {checkingAi ? (
+                          <p className="text-xs text-muted-foreground italic text-center py-6">Analyzing database parameters and M/M/1 wait times...</p>
+                        ) : (
+                          <>
+                            {aiDelayReport && (
+                              <div className="grid sm:grid-cols-3 gap-4">
+                                <div className="border border-border rounded-lg p-3 bg-muted/40">
+                                  <span className="block text-[9px] uppercase font-semibold text-muted-foreground">Congestion Delay Risk</span>
+                                  <span className={`block text-xl font-bold mt-1 ${aiDelayReport.delayProbability > 70 ? 'text-red-500' : aiDelayReport.delayProbability > 40 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                                    {aiDelayReport.delayProbability}%
+                                  </span>
+                                </div>
+                                <div className="border border-border rounded-lg p-3 bg-muted/40">
+                                  <span className="block text-[9px] uppercase font-semibold text-muted-foreground">Expected Processing Dwell</span>
+                                  <span className="block text-xl font-bold text-foreground mt-1">
+                                    {aiDelayReport.expectedProcessingHours} hrs
+                                  </span>
+                                </div>
+                                <div className="border border-border rounded-lg p-3 bg-muted/40">
+                                  <span className="block text-[9px] uppercase font-semibold text-muted-foreground">Audit verification</span>
+                                  <span className="block text-xl font-bold text-foreground mt-1 capitalize">
+                                    {aiDelayReport.confidenceScore}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {aiBacktrackSuggest && (
+                              <div className="rounded-lg border border-primary/10 bg-primary/[0.01] p-4.5">
+                                <h4 className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2">Backtrack suggestion helper</h4>
+                                <p className="text-xs text-muted-foreground leading-relaxed">{aiBacktrackSuggest.recommendation}</p>
+                                {aiBacktrackSuggest.missingDocuments && aiBacktrackSuggest.missingDocuments.length > 0 && (
+                                  <div className="mt-3.5">
+                                    <span className="block text-[10px] font-semibold text-foreground mb-1.5 uppercase">Missing Documents:</span>
+                                    <div className="flex flex-wrap gap-2">
+                                      {aiBacktrackSuggest.missingDocuments.map((doc) => (
+                                        <span key={doc} className="rounded bg-red-500/10 px-2 py-0.5 text-[9px] font-semibold text-red-500">
+                                          {doc}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="flex justify-end">
+                              <Button variant="outline" onClick={checkAiInsights}>Refresh Model Analysis</Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                  </Card>
+
+                  {/* File Audit Log Ledger */}
+                  <Card className="p-5">
+                    <h4 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-5">Ledger Movement History</h4>
+                    <div className="relative border-l border-border ml-2 pl-4 py-1 space-y-6">
+                      {selectedFileHistory.map((item, idx) => (
+                        <div key={idx} className="relative">
+                          <span className="absolute -left-[21px] mt-1 h-2.5 w-2.5 rounded-full bg-primary border-2 border-background ring-4 ring-background" />
+                          <div className="flex flex-wrap justify-between gap-3 text-xs">
+                            <div>
+                              <p className="font-bold text-foreground">{item.actionType}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">
+                                Desk: {item.currentLocation} · Officer: {item.officerId?.name}
+                              </p>
+                              {item.notes && <p className="text-[11px] text-muted-foreground mt-1.5 font-medium">{item.notes}</p>}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground">
+                              {new Date(item.timestamp).toLocaleString()}
+                            </span>
+                          </div>
                         </div>
                       ))}
                     </div>
-                    <FileActions file={result.file} onActionComplete={handleActionComplete} />
-                  </div>
+                  </Card>
                 </div>
+              ) : (
+                <Card className="p-8 text-center text-xs text-muted-foreground italic border-dashed">
+                  Search or scan a QR tag on a physical file envelope to start operations.
+                </Card>
               )}
+
             </div>
 
-            <aside className="space-y-6">
-              <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <h2 className="text-lg font-bold">Quick Search</h2>
-                <input
-                  id="quick-search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search file, citizen, tracking ID"
-                  className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-                <div className="mt-4 space-y-2">
-                  {searchResults.map((file) => (
-                    <button key={file._id} type="button" onClick={() => lookupFile(file.fileUid)} className="w-full rounded-xl border border-slate-100 p-3 text-left hover:border-blue-200 hover:bg-blue-50 dark:border-slate-800 dark:hover:bg-blue-950">
-                      <p className="text-sm font-semibold">{file.title}</p>
-                      <p className="text-xs text-slate-500">{file.fileUid} · {file.currentLocation}</p>
-                    </button>
-                  ))}
-                  {query.length >= 2 && !searchResults.length && <p className="text-sm text-slate-500">No matching active files.</p>}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <h2 className="text-lg font-bold">AI Suggestions</h2>
-                <p className="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200">
-                  {summary?.ai?.recommendation || 'AI suggestions will appear after files are processed.'}
-                </p>
-                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-950">
-                    <p className="text-slate-500">Delay Probability</p>
-                    <p className="text-xl font-bold">{summary?.ai?.delayProbability || 0}%</p>
-                  </div>
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-950">
-                    <p className="text-slate-500">Risk Score</p>
-                    <p className="text-xl font-bold">{summary?.ai?.riskScore || 0}</p>
-                  </div>
-                </div>
-              </div>
-            </aside>
-          </section>
-
-          <section className="mt-6 grid gap-6 xl:grid-cols-3">
-            <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <h2 className="text-lg font-bold">Department Queue</h2>
-              <div className="mt-5 space-y-4">
-                {(summary?.departmentQueue || []).map((item) => <QueueBar key={item._id} item={item} max={maxQueue} />)}
-                {!summary?.departmentQueue?.length && <p className="text-sm text-slate-500">No active queue data.</p>}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <h2 className="text-lg font-bold">Recent Activities</h2>
-              <div className="mt-5 space-y-3">
-                {(summary?.recentFiles || []).slice(0, 6).map((file) => (
-                  <button key={file._id} type="button" onClick={() => lookupFile(file.fileUid)} className="w-full rounded-xl border border-slate-100 p-3 text-left hover:border-blue-200 dark:border-slate-800">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold">{file.title}</p>
-                        <p className="text-xs text-slate-500">{file.citizenName} · {file.currentLocation}</p>
+            {/* Sidebar list: Recent movements */}
+            <div className="space-y-6">
+              <Card className="p-5">
+                <h4 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">Recent department actions</h4>
+                <div className="divide-y divide-border max-h-[420px] overflow-y-auto pr-1">
+                  {recentHistory.map((hist, idx) => (
+                    <div key={idx} className="py-3 text-xs first:pt-0 last:pb-0">
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="font-mono text-[9px] text-muted-foreground">{hist.fileId?.fileUid}</span>
+                        <Badge status={hist.actionType} />
                       </div>
-                      <span className={`rounded-full border px-2 py-1 text-[11px] font-bold ${riskStyles[file.ai?.risk?.label] || riskStyles.Low}`}>
-                        {file.ai?.risk?.label || 'Low'}
+                      <p className="font-bold text-foreground mt-1">{hist.fileId?.title}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Officer {hist.officerId?.name} at {hist.currentLocation}
+                      </p>
+                      <span className="block text-[9px] text-muted-foreground mt-1">
+                        {new Date(hist.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
-                  </button>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </Card>
+
+              {/* Department Queue Counts */}
+              <Card className="p-5">
+                <h4 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">Ward Section Queues</h4>
+                <div className="space-y-3">
+                  {departmentQueue.map((dept) => (
+                    <div key={dept._id} className="flex justify-between items-center text-xs">
+                      <span className="font-semibold text-foreground">{dept._id}</span>
+                      <div className="flex gap-2">
+                        {dept.pending > 0 && (
+                          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500">
+                            {dept.pending} delayed
+                          </span>
+                        )}
+                        <span className="rounded bg-muted px-2 py-0.5 font-bold text-foreground">{dept.count}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
             </div>
 
-            <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <h2 className="text-lg font-bold">Notifications</h2>
-              <div className="mt-5 space-y-3">
-                {(summary?.notifications || []).map((note) => (
-                  <div key={note.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
-                    <p className="text-sm font-semibold">{note.title}</p>
-                    <p className="text-xs text-slate-500">{note.message}</p>
-                  </div>
-                ))}
-                {!summary?.notifications?.length && <p className="text-sm text-slate-500">No new notifications.</p>}
-              </div>
-            </div>
-          </section>
+          </div>
 
-          <section className="mt-6 rounded-2xl border border-white/70 bg-white/90 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold">Recent Movement History</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Animated timeline style for audit-friendly demonstrations.</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 px-4 py-2 text-sm dark:border-slate-700">
-                Queue confidence: <strong>{prediction.predictionConfidence || 'medium'}</strong>
-              </div>
-            </div>
-            <div className="mt-5">
-              <Timeline items={summary?.recentHistory || []} />
-            </div>
-          </section>
-        </main>
+        </Container>
+      </main>
+
+      {/* QR scanner Modal */}
+      <Modal isOpen={isScannerOpen} onClose={stopCameraScanner} title="Webcam QR Handshake Scanner">
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Center the printed QR tag code within the viewfinder window box. The scanner will decode and load file ledger details automatically.
+          </p>
+          <div id="qr-reader-container" className="overflow-hidden rounded-lg border border-border bg-black aspect-square max-w-[280px] mx-auto" />
+          {scannerError && (
+            <p className="text-xs font-semibold text-red-500 text-center">{scannerError}</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={stopCameraScanner}>Cancel</Button>
+          </div>
+        </div>
+      </Modal>
+
     </div>
   );
 }

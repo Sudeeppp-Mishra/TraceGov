@@ -1,107 +1,145 @@
-import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { api, saveSession } from '../lib/api';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { api, saveSession, getStoredUser } from '../lib/api';
+import { Container, Card, Button, Input, Icons } from '../components/ui';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const initialRole = searchParams.get('role') === 'admin' ? 'admin' : 'officer';
-  const [loginRole, setLoginRole] = useState(initialRole);
+  const [searchParams] = useSearchParams();
+  
+  // Set default role from query param or fall back to officer
+  const queryRole = searchParams.get('role');
+  const [role, setRole] = useState(queryRole === 'admin' ? 'admin' : 'officer');
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  function handleRoleChange(role) {
-    setLoginRole(role);
-    setSearchParams({ role });
-  }
+  // Redirect if already authenticated
+  useEffect(() => {
+    const user = getStoredUser();
+    if (user) {
+      if (user.role === 'admin') navigate('/admin');
+      else navigate('/officer');
+    }
+  }, [navigate]);
 
-  async function handleSubmit(e) {
+  // Handle submit credentials
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!email.trim() || !password) return;
+
     setLoading(true);
     setError('');
+
     try {
-      const { token, user } = await api.login(email, password, loginRole);
-      saveSession(token, user);
-      if (user.role === 'citizen') navigate('/track');
-      else if (user.role === 'admin') navigate('/admin');
-      else navigate('/officer');
+      const response = await api.login(email.trim(), password, role);
+      saveSession(response.token, response.user);
+
+      // Routing redirect based on authenticated role
+      if (response.user.role === 'admin') {
+        navigate('/admin');
+      } else {
+        navigate('/officer');
+      }
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Authentication failed. Please verify credentials and try again.');
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-ward-green">TraceGov</h1>
-          <p className="text-gray-600 mt-1">Ward Office File Tracking</p>
+    <div className="min-h-screen bg-background text-foreground flex items-center justify-center py-12 px-4 transition-colors">
+      <div className="w-full max-w-md space-y-8 animate-in fade-in duration-200">
+        
+        {/* Brand identity */}
+        <div className="text-center">
+          <div className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground mb-4">
+            <span className="text-sm font-bold uppercase tracking-wider">TG</span>
+          </div>
+          <h2 className="text-2xl font-bold tracking-tight text-foreground">Sign in to TraceGov</h2>
+          <p className="mt-2 text-xs text-muted-foreground">Officer & Administrator Verification Terminal</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-md p-8 space-y-5">
-          <div>
-            <label className="block text-sm font-medium mb-2">Login As</label>
-            <div className="grid grid-cols-2 rounded-xl border border-gray-200 bg-gray-50 p-1">
-              {['officer', 'admin'].map((role) => (
-                <button
-                  key={role}
-                  type="button"
-                  onClick={() => handleRoleChange(role)}
-                  className={`rounded-lg px-3 py-2 text-sm font-semibold capitalize ${
-                    loginRole === role
-                      ? 'bg-white text-ward-green shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  {role}
-                </button>
-              ))}
-            </div>
+        <Card className="p-6 md:p-8 space-y-6">
+          {/* Custom minimal Tab Role Selector */}
+          <div className="grid grid-cols-2 p-1 bg-muted rounded-lg border border-border">
+            <button
+              type="button"
+              onClick={() => {
+                setRole('officer');
+                setError('');
+              }}
+              className={`py-2 text-xs font-semibold rounded-md transition-all cursor-pointer ${role === 'officer' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Officer Portal
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRole('admin');
+                setError('');
+              }}
+              className={`py-2 text-xs font-semibold rounded-md transition-all cursor-pointer ${role === 'admin' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Administrator
+            </button>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Email</label>
-            <input
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <Input
+              label="Work Email Address"
+              id="email"
               type="email"
+              placeholder="e.g. officer@ward.gov.np"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:ring-2 focus:ring-ward-green focus:border-transparent"
-              placeholder={loginRole === 'admin' ? 'admin@ward.gov.np' : 'officer@ward.gov.np'}
+              disabled={loading}
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Password</label>
-            <input
+
+            <Input
+              label="Account Password"
+              id="password"
               type="password"
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 focus:ring-2 focus:ring-ward-green focus:border-transparent"
+              disabled={loading}
             />
-          </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+            {error && (
+              <div className="rounded-lg border border-red-500/10 bg-red-500/5 p-3.5 text-xs font-medium text-red-600 dark:text-red-400 flex items-start gap-2 animate-shake">
+                <Icons.AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+            )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 rounded-xl bg-ward-green text-white font-semibold hover:bg-ward-green-light disabled:opacity-50"
+            <Button
+              type="submit"
+              variant="primary"
+              className="w-full py-2.5 mt-2"
+              disabled={loading}
+            >
+              {loading ? 'Verifying Account...' : 'Sign In'}
+            </Button>
+          </form>
+        </Card>
+
+        {/* Back Link to Public tracker */}
+        <div className="text-center">
+          <Link
+            to="/track"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-all"
           >
-            {loading ? 'Signing in…' : 'Sign In'}
-          </button>
-        </form>
-
-        <p className="text-center mt-6 text-sm text-gray-600">
-          Citizen?{' '}
-          <Link to="/track" className="text-ward-green font-medium hover:underline">
-            Track your file
+            <Icons.ArrowLeft className="h-3.5 w-3.5" />
+            Back to Public tracking
           </Link>
-        </p>
+        </div>
+
       </div>
     </div>
   );

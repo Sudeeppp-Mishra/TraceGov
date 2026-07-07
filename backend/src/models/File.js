@@ -1,46 +1,111 @@
 import mongoose from 'mongoose';
 
-const FILE_STATUSES = ['Received', 'Pending', 'Approved', 'Dispatched', 'Backtracked'];
+export const FILE_STATUSES = {
+  RECEIVED: 'Received',
+  PENDING: 'Pending',
+  APPROVED: 'Approved',
+  DISPATCHED: 'Dispatched',
+  BACKTRACKED: 'Backtracked',
+};
 
 const fileSchema = new mongoose.Schema(
   {
     fileUid: {
       type: String,
-      required: true,
+      required: [true, 'File UID is required'],
       unique: true,
       index: true,
+      trim: true,
     },
     trackingId: {
       type: String,
-      required: true,
+      required: [true, 'Tracking ID is required'],
       unique: true,
       index: true,
+      trim: true,
     },
-    title: { type: String, required: true, trim: true },
-    citizenName: { type: String, required: true, trim: true },
-    citizenPhone: { type: String, trim: true },
-    documentType: { type: String, required: true, trim: true },
-    wardCode: { type: String, required: true, index: true },
+    title: {
+      type: String,
+      required: [true, 'File title is required'],
+      trim: true,
+      maxlength: [200, 'Title cannot exceed 200 characters'],
+    },
+    citizenName: {
+      type: String,
+      required: [true, 'Citizen name is required'],
+      trim: true,
+    },
+    citizenPhone: {
+      type: String,
+      required: [true, 'Citizen phone number is required'],
+      trim: true,
+      match: [/^\d{10}$/, 'Phone number must be exactly 10 digits'],
+    },
+    documentType: {
+      type: String,
+      required: [true, 'Document type is required'],
+      trim: true,
+    },
+    wardCode: {
+      type: String,
+      required: [true, 'Ward code is required'],
+      index: true,
+      trim: true,
+    },
     currentStatus: {
       type: String,
-      enum: FILE_STATUSES,
-      default: 'Received',
+      enum: Object.values(FILE_STATUSES),
+      default: FILE_STATUSES.RECEIVED,
       index: true,
     },
-    currentLocation: { type: String, required: true, index: true },
-    assignedOfficerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    qrPayload: { type: String, required: true },
-    qrDataUrl: { type: String },
-    requiredDocuments: [{ type: String }],
-    internalNotes: { type: String, select: false },
-    priority: { type: Number, default: 0, index: true },
-    isClosed: { type: Boolean, default: false, index: true },
+    currentLocation: {
+      type: String,
+      required: [true, 'Current location/desk is required'],
+      default: 'Reception',
+      index: true,
+      trim: true,
+    },
+    assignedOfficerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
+    },
+    qrPayload: {
+      type: String,
+      required: [true, 'QR code payload string is required'],
+    },
+    qrDataUrl: {
+      type: String, // Base64 Data URL for rendering the QR code directly
+    },
+    requiredDocuments: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+    internalNotes: {
+      type: String,
+      select: false, // Accessible only when explicitly selected
+      trim: true,
+    },
+    priority: {
+      type: Number,
+      default: 0, // 0 = Standard, 1 = Medium, 2 = High/Urgent
+      index: true,
+    },
+    isClosed: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
+// Indexes to speed up admin summaries and searches
 fileSchema.index({ wardCode: 1, currentStatus: 1, updatedAt: -1 });
 fileSchema.index({ citizenName: 'text', title: 'text', fileUid: 'text' });
 
 export const File = mongoose.model('File', fileSchema);
-export { FILE_STATUSES };

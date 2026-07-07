@@ -1,67 +1,112 @@
 import mongoose from 'mongoose';
 
-const ACTION_TYPES = ['Received', 'Pending', 'Approved', 'Dispatched', 'Backtracked'];
+export const ACTION_TYPES = {
+  RECEIVED: 'Received',
+  PENDING: 'Pending',
+  APPROVED: 'Approved',
+  DISPATCHED: 'Dispatched',
+  BACKTRACKED: 'Backtracked',
+};
 
-/**
- * Immutable audit log — append-only with hash chain for tamper evidence.
- * Updates and deletes are blocked at the schema middleware level.
- */
 const movementHistorySchema = new mongoose.Schema(
   {
     fileId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'File',
-      required: true,
+      required: [true, 'File reference is required'],
       index: true,
     },
     officerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: [true, 'Officer reference is required'],
       index: true,
     },
     actionType: {
       type: String,
-      enum: ACTION_TYPES,
-      required: true,
+      enum: Object.values(ACTION_TYPES),
+      required: [true, 'Action type is required'],
       index: true,
     },
-    currentLocation: { type: String, required: true },
-    previousLocation: { type: String },
+    currentLocation: {
+      type: String,
+      required: [true, 'Current location/desk is required'],
+      trim: true,
+    },
+    previousLocation: {
+      type: String,
+      trim: true,
+    },
     timestamp: {
       type: Date,
       default: Date.now,
       required: true,
       index: true,
     },
-    notes: { type: String, trim: true },
-    /** Internal-only notes — never exposed on citizen tracking endpoint */
-    internalNotes: { type: String, select: false },
-    backtrackReason: { type: String },
-    nextLocation: { type: String },
-    previousHash: { type: String, required: true, default: 'GENESIS' },
-    entryHash: { type: String, required: true, index: true },
+    notes: {
+      type: String,
+      trim: true,
+    },
+    internalNotes: {
+      type: String,
+      select: false, // Internal notes never exposed on public tracking endpoints
+      trim: true,
+    },
+    backtrackReason: {
+      type: String,
+      trim: true,
+    },
+    nextLocation: {
+      type: String,
+      trim: true,
+    },
+    previousHash: {
+      type: String,
+      required: [true, 'Previous hash link is required'],
+      default: 'GENESIS',
+    },
+    entryHash: {
+      type: String,
+      required: [true, 'Entry cryptographic hash is required'],
+      index: true,
+    },
   },
   {
-    timestamps: false,
+    timestamps: false, // Disabled since we track timestamp manually as immutable Date
     collection: 'movementhistories',
   }
 );
 
+// Indexes for fast history listings and audit checking
 movementHistorySchema.index({ fileId: 1, timestamp: -1 });
 movementHistorySchema.index({ fileId: 1, entryHash: 1 });
 
+// Immutable constraints: Throw errors if updates/deletions are attempted at the ORM level
+movementHistorySchema.pre('save', function blockDocumentUpdate(next) {
+  if (!this.isNew) {
+    return next(new Error('MovementHistory is immutable: modification of existing entries is forbidden'));
+  }
+  next();
+});
+
 movementHistorySchema.pre('findOneAndUpdate', function blockUpdate() {
-  throw new Error('MovementHistory is immutable — updates are not permitted');
+  throw new Error('MovementHistory is immutable: query-level updates are forbidden');
 });
 
 movementHistorySchema.pre('updateOne', function blockUpdate() {
-  throw new Error('MovementHistory is immutable — updates are not permitted');
+  throw new Error('MovementHistory is immutable: query-level updates are forbidden');
+});
+
+movementHistorySchema.pre('updateMany', function blockUpdate() {
+  throw new Error('MovementHistory is immutable: query-level updates are forbidden');
 });
 
 movementHistorySchema.pre('deleteOne', function blockDelete() {
-  throw new Error('MovementHistory is immutable — deletes are not permitted');
+  throw new Error('MovementHistory is immutable: deletions are forbidden');
+});
+
+movementHistorySchema.pre('deleteMany', function blockDelete() {
+  throw new Error('MovementHistory is immutable: deletions are forbidden');
 });
 
 export const MovementHistory = mongoose.model('MovementHistory', movementHistorySchema);
-export { ACTION_TYPES };

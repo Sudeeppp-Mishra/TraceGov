@@ -29,14 +29,17 @@ export async function trackFile(req, res, next) {
       .select('actionType currentLocation timestamp notes backtrackReason -_id')
       .lean();
 
-    // Format logs into citizen-friendly language
+    // Format logs into citizen-friendly language. Public tracking should explain
+    // delays and correction loops clearly without exposing internal officer notes.
     const citizenTimeline = movements.map((log) => {
       let displayMessage = log.notes || log.actionType;
 
       if (log.actionType === FILE_STATUSES.BACKTRACKED) {
-        displayMessage = 'Returned for corrections';
+        displayMessage = log.backtrackReason
+          ? `Returned for correction: ${log.backtrackReason}`
+          : 'Returned for correction. Please contact the current desk for details.';
       } else if (displayMessage.startsWith('Backtracked:')) {
-        displayMessage = 'Processing update under review';
+        displayMessage = displayMessage.replace(/^Backtracked:\s*/i, 'Returned for correction: ');
       }
 
       return {
@@ -44,6 +47,7 @@ export async function trackFile(req, res, next) {
         location: log.currentLocation,
         timestamp: log.timestamp,
         message: displayMessage,
+        requiresCitizenAction: log.actionType === FILE_STATUSES.BACKTRACKED,
       };
     });
 

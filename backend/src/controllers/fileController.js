@@ -135,6 +135,16 @@ export async function getDashboardSummary(req, res, next) {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
+    // Ward isolation for MovementHistory: MovementHistory has no wardCode field of
+    // its own (only a fileId reference), so we resolve the set of file IDs visible
+    // under baseFilter once and reuse it to scope every MovementHistory query below
+    // the same way the File queries are already scoped. For admins with
+    // allWards=true, baseFilter is {} so this resolves to every file (unchanged
+    // behavior); for officers (and non-allWards admins) it resolves to only their
+    // ward's files, preventing cross-ward movement data from leaking into the
+    // response.
+    const wardFileIds = await File.find(baseFilter).distinct('_id');
+
     const [
       statusCounts,
       todayFilesCount,
@@ -159,8 +169,8 @@ export async function getDashboardSummary(req, res, next) {
         .populate('assignedOfficerId', 'name deskLocation')
         .select('fileUid title citizenName documentType currentStatus currentLocation updatedAt createdAt requiredDocuments')
         .lean(),
-      // System-wide updates
-      MovementHistory.find({})
+      // Ward-scoped updates (restricted to files visible under baseFilter)
+      MovementHistory.find({ fileId: { $in: wardFileIds } })
         .sort({ timestamp: -1 })
         .limit(12)
         .populate('fileId', 'fileUid title wardCode currentStatus')
@@ -179,9 +189,9 @@ export async function getDashboardSummary(req, res, next) {
         },
         { $sort: { count: -1 } },
       ]),
-      // Officers load
+      // Officers load (restricted to movements on files visible under baseFilter)
       MovementHistory.aggregate([
-        { $match: { timestamp: { $gte: startOfToday } } },
+        { $match: { timestamp: { $gte: startOfToday }, fileId: { $in: wardFileIds } } },
         {
           $group: {
             _id: '$officerId',
@@ -195,17 +205,21 @@ export async function getDashboardSummary(req, res, next) {
         { $unwind: { path: '$officer', preserveNullAndEmptyArrays: true } },
         { $project: { processed: 1, backtracked: 1, name: '$officer.name', deskLocation: '$officer.deskLocation' } },
       ]),
-      // Finished files list
-      MovementHistory.find({ actionType: { $in: [FILE_STATUSES.APPROVED, FILE_STATUSES.DISPATCHED] } })
+      // Finished files list (restricted to files visible under baseFilter)
+      MovementHistory.find({
+        actionType: { $in: [FILE_STATUSES.APPROVED, FILE_STATUSES.DISPATCHED] },
+        fileId: { $in: wardFileIds },
+      })
         .sort({ timestamp: -1 })
         .limit(100)
         .populate('fileId', 'createdAt wardCode')
         .select('fileId timestamp')
         .lean(),
-      // Backtracks count today
+      // Backtracks count today (restricted to files visible under baseFilter)
       MovementHistory.countDocuments({
         actionType: FILE_STATUSES.BACKTRACKED,
         timestamp: { $gte: startOfToday },
+        fileId: { $in: wardFileIds },
       }),
     ]);
 
@@ -558,4 +572,3 @@ export async function getOfficerInbox(req, res, next) {
     next(err);
   }
 }
-

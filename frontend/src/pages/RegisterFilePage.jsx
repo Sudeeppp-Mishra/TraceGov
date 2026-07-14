@@ -104,7 +104,7 @@ export default function RegisterFilePage() {
             <Card className="p-6 md:p-8">
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Input label="Citizen full name" id="name" placeholder="e.g. Sudeep Mishra" value={citizenName} onChange={(e) => setCitizenName(e.target.value)} required disabled={loading} />
+                  <Input label="Citizen full name" id="name" placeholder="e.g. Aarav Sharma" value={citizenName} onChange={(e) => setCitizenName(e.target.value)} required disabled={loading} />
                   <Input label="Mobile (10 digits)" id="phone" placeholder="9841234567" value={citizenPhone} onChange={(e) => setCitizenPhone(e.target.value)} required disabled={loading} inputMode="numeric" maxLength={10} />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">

@@ -3,9 +3,13 @@ import mongoose from 'mongoose';
 export const ACTION_TYPES = {
   RECEIVED: 'Received',
   PENDING: 'Pending',
+  UNDER_REVIEW: 'Under Review',
   APPROVED: 'Approved',
+  VERIFIED: 'Verified',
   DISPATCHED: 'Dispatched',
   BACKTRACKED: 'Backtracked',
+  RETURNED: 'Returned',
+  REJECTED: 'Rejected',
 };
 
 const movementHistorySchema = new mongoose.Schema(
@@ -80,6 +84,7 @@ const movementHistorySchema = new mongoose.Schema(
 // Indexes for fast history listings and audit checking
 movementHistorySchema.index({ fileId: 1, timestamp: -1 });
 movementHistorySchema.index({ fileId: 1, entryHash: 1 });
+movementHistorySchema.index({ fileId: 1, actionType: 1 });
 
 // Immutable constraints: Throw errors if updates/deletions are attempted at the ORM level
 movementHistorySchema.pre('save', function blockDocumentUpdate(next) {

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import {
@@ -63,26 +63,87 @@ export default function CitizenTrackPage() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
 
-  const handleTrackSubmit = async (e) => {
-    e.preventDefault();
-    if (!trackingId.trim()) return;
+  // Application searches history
+  const [previousSearches, setPreviousSearches] = useState(() => {
+    try {
+      const saved = localStorage.getItem('tracegov_searches');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [lastStatus, setLastStatus] = useState(null);
+
+  const saveSearchHistory = (id, title) => {
+    setPreviousSearches((prev) => {
+      const filtered = prev.filter((x) => x.id !== id);
+      const updated = [{ id, title }, ...filtered].slice(0, 5);
+      localStorage.setItem('tracegov_searches', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const runTrack = async (id) => {
     setLoading(true);
     setError('');
     setAiEstimate(null);
     setSearched(true);
     try {
-      const cleanId = trackingId.trim().toUpperCase();
+      const cleanId = id.trim().toUpperCase();
       const [trackData, estimateData] = await Promise.all([
         api.trackCitizen(cleanId),
         api.estimateCompletion(cleanId).catch(() => null),
       ]);
       setFileDetails(trackData);
       setAiEstimate(estimateData);
+      saveSearchHistory(cleanId, trackData.title);
     } catch (err) {
       setError(err.message || 'Tracking ID not found. Please check the ID and try again.');
       setFileDetails(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTrackSubmit = async (e) => {
+    e.preventDefault();
+    if (!trackingId.trim()) return;
+    await runTrack(trackingId);
+  };
+
+  const handleQuickTrack = (id) => {
+    setTrackingId(id);
+    runTrack(id);
+  };
+
+  // Auto-refresh monitoring loop
+  useEffect(() => {
+    if (!autoRefresh || !fileDetails || fileDetails.currentStatus === 'Dispatched') return;
+    const interval = setInterval(() => {
+      runTrack(fileDetails.trackingId);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, fileDetails]);
+
+  // Handle push notification updates on status change
+  useEffect(() => {
+    if (fileDetails) {
+      if (lastStatus && lastStatus !== fileDetails.currentStatus) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('File Status Update', {
+            body: `Your file "${fileDetails.title}" status changed to: ${fileDetails.currentStatus} at ${fileDetails.currentLocation}.`,
+          });
+        }
+      }
+      setLastStatus(fileDetails.currentStatus);
+    }
+  }, [fileDetails]);
+
+  const requestNotificationPermission = () => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
     }
   };
 
@@ -152,18 +213,40 @@ export default function CitizenTrackPage() {
 
           {/* Idle empty state */}
           {!loading && !error && !searched && (
-            <div className="grid gap-4 sm:grid-cols-3">
-              {[
-                { icon: Icons.QrCode, t: 'Find your ID', d: 'It’s printed on your file receipt, starting with TG.' },
-                { icon: Icons.Route, t: 'See live movement', d: 'Follow your file across every desk in real time.' },
-                { icon: Icons.Clock, t: 'Know the wait', d: 'Get an AI estimate of how long it will take.' },
-              ].map((x) => (
-                <div key={x.t} className="rounded-2xl border border-border bg-card p-5">
-                  <x.icon className="h-5 w-5 text-primary" />
-                  <p className="mt-3 text-sm font-semibold text-foreground">{x.t}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{x.d}</p>
-                </div>
-              ))}
+            <div className="space-y-6 animate-fade-up">
+              {previousSearches.length > 0 && (
+                <Card className="p-5">
+                  <h4 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Recent searches</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {previousSearches.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => handleQuickTrack(s.id)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-all hover:bg-muted hover:border-border-strong cursor-pointer"
+                      >
+                        <Icons.Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="font-mono text-primary">{s.id}</span>
+                        <span className="max-w-[150px] truncate text-muted-foreground font-normal">({s.title})</span>
+                      </button>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                {[
+                  { icon: Icons.QrCode, t: 'Find your ID', d: 'It’s printed on your file receipt, starting with TG.' },
+                  { icon: Icons.Route, t: 'See live movement', d: 'Follow your file across every desk in real time.' },
+                  { icon: Icons.Clock, t: 'Know the wait', d: 'Get an AI estimate of how long it will take.' },
+                ].map((x) => (
+                  <div key={x.t} className="rounded-2xl border border-border bg-card p-5">
+                    <x.icon className="h-5 w-5 text-primary" />
+                    <p className="mt-3 text-sm font-semibold text-foreground">{x.t}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{x.d}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -186,29 +269,54 @@ export default function CitizenTrackPage() {
 
               <div className="grid items-start gap-6 md:grid-cols-[1fr_1.1fr]">
                 <div className="space-y-6">
-                  <Card className="p-6">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-mono text-[11px] text-muted-foreground">{fileDetails.trackingId}</p>
-                        <h2 className="mt-1.5 text-lg font-bold leading-snug text-foreground">{fileDetails.title}</h2>
-                        <p className="mt-1 text-xs text-muted-foreground">{fileDetails.documentType} · Ward {fileDetails.wardCode}</p>
+                  <div className="space-y-4">
+                    <Card className="p-6">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-mono text-[11px] text-muted-foreground">{fileDetails.trackingId}</p>
+                          <h2 className="mt-1.5 text-lg font-bold leading-snug text-foreground">{fileDetails.title}</h2>
+                          <p className="mt-1 text-xs text-muted-foreground">{fileDetails.documentType} · Ward {fileDetails.wardCode}</p>
+                        </div>
+                        <Badge status={fileDetails.currentStatus} />
                       </div>
-                      <Badge status={fileDetails.currentStatus} />
-                    </div>
-                    <hr className="my-5 border-border" />
-                    <dl className="grid grid-cols-2 gap-4">
-                      <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Current desk</dt>
-                        <dd className="mt-1 text-sm font-semibold text-foreground">{fileDetails.currentLocation}</dd>
+                      <hr className="my-5 border-border" />
+                      <dl className="grid grid-cols-2 gap-4">
+                        <div>
+                          <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Current desk</dt>
+                          <dd className="mt-1 text-sm font-semibold text-foreground">{fileDetails.currentLocation}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Last updated</dt>
+                          <dd className="mt-1 text-sm font-semibold text-foreground">
+                            {new Date(fileDetails.lastUpdated).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </dd>
+                        </div>
+                      </dl>
+                    </Card>
+
+                    {fileDetails.currentStatus !== 'Dispatched' && (
+                      <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-4 text-xs font-semibold">
+                        <label className="flex items-center gap-2 text-foreground cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={autoRefresh}
+                            onChange={(e) => {
+                              setAutoRefresh(e.target.checked);
+                              if (e.target.checked) requestNotificationPermission();
+                            }}
+                            className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/20 accent-primary"
+                          />
+                          Auto-refresh status (30s)
+                        </label>
+                        {autoRefresh && (
+                          <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
+                            Live monitoring active
+                          </span>
+                        )}
                       </div>
-                      <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Last updated</dt>
-                        <dd className="mt-1 text-sm font-semibold text-foreground">
-                          {new Date(fileDetails.lastUpdated).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                        </dd>
-                      </div>
-                    </dl>
-                  </Card>
+                    )}
+                  </div>
 
                   <div className="rounded-2xl border border-primary/15 bg-primary/[0.03] p-6">
                     <div className="flex items-center gap-2">

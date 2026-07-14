@@ -7,6 +7,7 @@ import { AppShell, PageHeading } from '../components/layout';
 export default function AIInsightsDashboard() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(null);
+  const [metrics, setMetrics] = useState(null);
   const [queuePrediction, setQueuePrediction] = useState(null);
   const [aiInsights, setAiInsights] = useState(null);
   const [bottlenecks, setBottlenecks] = useState([]);
@@ -146,7 +147,15 @@ export default function AIInsightsDashboard() {
                             <span className="font-mono text-[9px] text-muted-foreground">{file.fileUid}</span>
                             <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-red-500">{file.ai?.risk?.score || 85}% risk</span>
                           </div>
-                          <p className="mt-1.5 font-bold text-foreground">{file.title}</p>
+                          <p className="mt-1.5 flex items-center gap-1.5 font-bold text-foreground">
+                            <span className="truncate">{file.title}</span>
+                            {!['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
+                              <span className="relative flex h-1.5 w-1.5 shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500"></span>
+                              </span>
+                            )}
+                          </p>
                           <p className="mt-0.5 text-[10px] text-muted-foreground">At <strong>{file.currentLocation}</strong> · {file.currentStatus}</p>
                           {file.ai?.missingDocuments?.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1">

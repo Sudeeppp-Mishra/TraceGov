@@ -3,9 +3,13 @@ import mongoose from 'mongoose';
 export const FILE_STATUSES = {
   RECEIVED: 'Received',
   PENDING: 'Pending',
+  UNDER_REVIEW: 'Under Review',
   APPROVED: 'Approved',
+  VERIFIED: 'Verified',
   DISPATCHED: 'Dispatched',
   BACKTRACKED: 'Backtracked',
+  RETURNED: 'Returned',
+  REJECTED: 'Rejected',
 };
 
 const fileSchema = new mongoose.Schema(
@@ -107,5 +111,6 @@ const fileSchema = new mongoose.Schema(
 // Indexes to speed up admin summaries and searches
 fileSchema.index({ wardCode: 1, currentStatus: 1, updatedAt: -1 });
 fileSchema.index({ citizenName: 'text', title: 'text', fileUid: 'text' });
+fileSchema.index({ wardCode: 1, isClosed: 1, currentStatus: 1 });
 
 export const File = mongoose.model('File', fileSchema);

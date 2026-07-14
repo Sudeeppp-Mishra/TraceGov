@@ -7,8 +7,14 @@ export async function connectDatabase() {
   const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/tracegov';
 
   try {
-    mongoose.connection.on('connected', () => {
+    mongoose.connection.on('connected', async () => {
       console.log('MongoDB: Connected successfully');
+      try {
+        await mongoose.connection.db.collection('files').dropIndex('trackingNumber_1');
+        console.log('MongoDB: Cleared stale unique index trackingNumber_1');
+      } catch (err) {
+        // Index does not exist or already dropped, ignore
+      }
     });
 
     mongoose.connection.on('error', (err) => {

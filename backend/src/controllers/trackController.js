@@ -9,13 +9,18 @@ export async function trackFile(req, res, next) {
   try {
     const trackingId = req.params.trackingId.toUpperCase().trim();
 
-    // Query file, excluding sensitive staff parameters
-    const file = await File.findOne({ trackingId })
+    // Query file by trackingId OR fileUid
+    const file = await File.findOne({
+      $or: [
+        { trackingId },
+        { fileUid: trackingId }
+      ]
+    })
       .select('-internalNotes -qrPayload -assignedOfficerId')
       .lean();
 
     if (!file) {
-      return res.status(404).json({ error: 'Tracking ID not found in database records' });
+      return res.status(404).json({ error: 'Tracking ID or File UID not found in database records' });
     }
 
     // Retrieve ledger, excluding unique primary keys and private officer logs

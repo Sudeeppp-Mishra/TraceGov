@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Html5Qrcode } from 'html5-qrcode';
 import { api, getStoredUser } from '../lib/api';
 import {
@@ -8,19 +8,18 @@ import {
 } from '../components/ui';
 import { AppShell, PageHeading } from '../components/layout';
 
-const DESK_OPTIONS = [
-  'Reception', 'Verification Desk', 'Ward Chair Section',
-  'Tax Office Desk', 'Administrative Archives', 'Review Panel Office',
-];
+
 
 export default function OfficerDashboard() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
   const [currentUser, setCurrentUser] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [departmentQueue, setDepartmentQueue] = useState([]);
   const [recentHistory, setRecentHistory] = useState([]);
   const [officers, setOfficers] = useState([]);
+  const [departmentsList, setDepartmentsList] = useState([]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -31,6 +30,7 @@ export default function OfficerDashboard() {
 
   const [actionTab, setActionTab] = useState('forward');
   const [nextLocation, setNextLocation] = useState('');
+  const [nextStatus, setNextStatus] = useState('Pending');
   const [routingNotes, setRoutingNotes] = useState('');
   const [backtrackLocation, setBacktrackLocation] = useState('');
   const [backtrackReason, setBacktrackReason] = useState('');
@@ -55,17 +55,30 @@ export default function OfficerDashboard() {
     loadDashboard(user.wardCode);
   }, [navigate]);
 
+  // Auto-open a file passed via ?file= (e.g. from the Inbox), then clear the param.
+  useEffect(() => {
+    const fileParam = searchParams.get('file');
+    if (fileParam) {
+      handleSelectFile(fileParam);
+      searchParams.delete('file');
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const loadDashboard = async (wardCode) => {
     try {
       setLoading(true);
-      const [summary, officersList] = await Promise.all([
+      const [summary, officersList, deptsData] = await Promise.all([
         api.dashboardSummary({ wardCode }),
         api.getOfficers().catch(() => []),
+        api.getDepartments().catch(() => ({ departments: [] })),
       ]);
       setMetrics(summary.metrics);
       setDepartmentQueue(summary.departmentQueue || []);
       setRecentHistory(summary.recentHistory || []);
       setOfficers(officersList);
+      setDepartmentsList(deptsData.departments || []);
     } catch (err) {
       toast.error('Failed to load dashboard metrics.');
     } finally {
@@ -93,6 +106,7 @@ export default function OfficerDashboard() {
       setSelectedFileHistory(data.recentHistory || []);
       setIsAuditValid(data.auditChainValid);
       setNextLocation(''); setBacktrackLocation(''); setRoutingNotes('');
+      setNextStatus('Pending');
       setBacktrackReason(''); setInternalNotes(''); setAiDelayReport(null); setAiBacktrackSuggest(null);
       setActionTab('forward');
       setSearchQuery(''); setSearchResults([]);
@@ -132,8 +146,8 @@ export default function OfficerDashboard() {
     if (!nextLocation) return;
     setActionLoading(true);
     try {
-      await api.forwardFile(selectedFile.id, { nextLocation, notes: routingNotes.trim() });
-      toast.success(`File forwarded to ${nextLocation}.`);
+      await api.forwardFile(selectedFile.id, { nextLocation, nextStatus, notes: routingNotes.trim() });
+      toast.success(`File routed successfully with "${nextStatus}" status.`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid);
     } catch (err) {
@@ -231,7 +245,15 @@ export default function OfficerDashboard() {
                           className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted cursor-pointer">
                           <div className="min-w-0">
                             <span className="font-mono text-[10px] text-muted-foreground">{file.fileUid}</span>
-                            <span className="mt-0.5 block truncate text-sm font-semibold text-foreground">{file.title}</span>
+                            <span className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                              <span className="truncate">{file.title}</span>
+                              {!['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
+                                <span className="relative flex h-2 w-2 shrink-0">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
+                                </span>
+                              )}
+                            </span>
                             <span className="text-[11px] text-muted-foreground">{file.citizenName} · {file.currentLocation}</span>
                           </div>
                           <Badge status={file.currentStatus} />
@@ -278,14 +300,23 @@ export default function OfficerDashboard() {
                   <div className="mt-5">
                     {actionTab === 'forward' && (
                       <form onSubmit={handleForwardFile} className="space-y-4">
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <Select label="Target desk" id="f_loc" value={nextLocation} onChange={(e) => setNextLocation(e.target.value)} required>
+                        <div className="grid gap-4 sm:grid-cols-3">
+                          <Select label="Target desk" id="f_loc" value={nextLocation} onChange={(e) => setNextLocation(e.target.value)} required={!['Approved', 'Dispatched'].includes(nextStatus)}>
                             <option value="">Choose desk…</option>
-                            {DESK_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                            {departmentsList.filter((d) => d.isActive).map((d) => (
+                              <option key={d.name} value={d.name}>{d.name}</option>
+                            ))}
                           </Select>
                           <Select label="Assign officer" id="f_off">
                             <option value="">Auto-assign section staff…</option>
-                            {officers.map((off) => <option key={off.id} value={off.id}>{off.name} ({off.deskLocation})</option>)}
+                            {officers.map((off) => <option key={off._id || off.id} value={off._id || off.id}>{off.name} ({off.deskLocation})</option>)}
+                          </Select>
+                          <Select label="Update file status" id="f_status" value={nextStatus} onChange={(e) => setNextStatus(e.target.value)} required>
+                            <option value="Pending">Pending (Under routing)</option>
+                            <option value="Under Review">Under Review (Details verification)</option>
+                            <option value="Verified">Verified (Verification complete)</option>
+                            <option value="Approved">Approved (Final endorsement)</option>
+                            <option value="Dispatched">Dispatched (Closed / Archiving)</option>
                           </Select>
                         </div>
                         <Textarea label="Routing notes" id="f_notes" rows={2}
@@ -302,7 +333,9 @@ export default function OfficerDashboard() {
                         <div className="grid gap-4 sm:grid-cols-2">
                           <Select label="Return to desk" id="b_loc" value={backtrackLocation} onChange={(e) => setBacktrackLocation(e.target.value)} required>
                             <option value="">Choose desk…</option>
-                            {DESK_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                            {departmentsList.filter((d) => d.isActive).map((d) => (
+                              <option key={d.name} value={d.name}>{d.name}</option>
+                            ))}
                           </Select>
                           <Input label="Reason (visible to citizen)" id="b_reason"
                             placeholder="e.g. Missing ward form stamp." value={backtrackReason}
@@ -408,7 +441,15 @@ export default function OfficerDashboard() {
                         <span className="font-mono text-[9px] text-muted-foreground">{hist.fileId?.fileUid}</span>
                         <Badge status={hist.actionType} dot={false} />
                       </div>
-                      <p className="mt-1 font-semibold text-foreground">{hist.fileId?.title}</p>
+                      <p className="mt-1 flex items-center gap-1.5 font-semibold text-foreground">
+                        <span className="truncate">{hist.fileId?.title}</span>
+                        {!['Approved', 'Verified', 'Dispatched'].includes(hist.actionType) && (
+                          <span className="relative flex h-1.5 w-1.5 shrink-0">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500"></span>
+                          </span>
+                        )}
+                      </p>
                       <p className="mt-0.5 text-[10px] text-muted-foreground">{hist.officerId?.name} · {hist.currentLocation}</p>
                     </div>
                   ))}

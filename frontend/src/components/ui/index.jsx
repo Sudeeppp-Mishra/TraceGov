@@ -414,6 +414,155 @@ function ToastCard({ type, message, title, onDismiss }) {
   );
 }
 
+/* ───────────────────────── Tabs ───────────────────────── */
+
+export function Tabs({ tabs, active, onChange, className = '' }) {
+  return (
+    <div className={`flex gap-1 rounded-xl border border-border bg-muted p-1 ${className}`} role="tablist">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          role="tab"
+          type="button"
+          aria-selected={active === t.id}
+          onClick={() => onChange(t.id)}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all cursor-pointer ${
+            active === t.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {t.icon && <t.icon className="h-3.5 w-3.5" />}
+          <span className="whitespace-nowrap">{t.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ───────────────────────── Charts (dependency-free) ───────────────────────── */
+
+// Vertical column chart. data: [{ label, value }]
+// Vertical column SVG chart. data: [{ label, value }]
+export function BarChart({ data, height = 180, className = '' }) {
+  if (!data || data.length === 0) return null;
+  const maxVal = Math.max(...data.map((d) => d.value), 1);
+  
+  const paddingX = 35;
+  const paddingY = 20;
+  const chartHeight = height - paddingY * 2;
+  const totalWidth = 480;
+  
+  return (
+    <div className={`w-full overflow-hidden ${className}`}>
+      <svg className="w-full h-auto overflow-visible" viewBox={`0 0 ${totalWidth} ${height}`}>
+        {/* Horizontal grid lines */}
+        {Array.from({ length: 4 }).map((_, idx) => {
+          const y = paddingY + (chartHeight / 3) * idx;
+          const val = Math.round(maxVal - (maxVal / 3) * idx);
+          return (
+            <g key={idx} className="opacity-30 dark:opacity-20">
+              <line x1={paddingX} y1={y} x2={totalWidth - 10} y2={y} stroke="var(--border-strong)" strokeWidth={1} strokeDasharray="3 3" />
+              <text x={paddingX - 8} y={y + 3} textAnchor="end" className="fill-muted-foreground text-[10px] font-mono font-medium">{val}</text>
+            </g>
+          );
+        })}
+        
+        {/* Columns */}
+        {data.map((d, idx) => {
+          const spacing = (totalWidth - paddingX - 10) / data.length;
+          const barWidth = Math.max(16, spacing - 14);
+          const x = paddingX + 10 + idx * spacing;
+          const pct = d.value / maxVal;
+          const barHeight = pct * chartHeight;
+          const y = paddingY + chartHeight - barHeight;
+          
+          return (
+            <g key={d.label} className="group cursor-pointer">
+              {/* Invisible interactive background block */}
+              <rect x={x - 6} y={paddingY} width={barWidth + 12} height={chartHeight} fill="transparent" />
+              
+              {/* Dynamic Gradient Bar */}
+              <rect
+                x={x}
+                y={y}
+                width={barWidth}
+                height={barHeight}
+                rx={4}
+                fill="var(--primary)"
+                className="fill-primary/70 transition-all duration-300 group-hover:fill-emerald-500"
+              />
+              
+              {/* Text tooltip visible on hover */}
+              <text
+                x={x + barWidth / 2}
+                y={y - 6}
+                textAnchor="middle"
+                className="fill-foreground text-[10px] font-mono font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+              >
+                {d.value}
+              </text>
+              
+              {/* Label text */}
+              <text
+                x={x + barWidth / 2}
+                y={paddingY + chartHeight + 14}
+                textAnchor="middle"
+                className="fill-muted-foreground text-[10px] font-semibold"
+              >
+                {d.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// Horizontal ranked bars. data: [{ label, value, tone? }]
+export function BarList({ data, valueFormat = (v) => v, className = '' }) {
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const toneClass = { emerald: 'bg-emerald-500', amber: 'bg-amber-500', red: 'bg-red-500', primary: 'bg-primary/80' };
+  return (
+    <div className={`space-y-3.5 ${className}`}>
+      {data.map((d) => {
+        const pct = Math.max(6, (d.value / max) * 100);
+        return (
+          <div key={d.label} className="space-y-1.5 text-xs">
+            <div className="flex justify-between font-semibold text-foreground">
+              <span className="truncate pr-2">{d.label}</span>
+              <span className="tabular-nums text-muted-foreground">{valueFormat(d.value)}</span>
+            </div>
+            <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+              <div className={`h-full rounded-full transition-all duration-700 ${toneClass[d.tone] || toneClass.primary}`} style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Single-ratio donut ring (SVG).
+export function DonutChart({ value, max = 100, size = 132, stroke = 13, label, tone = 'emerald', className = '' }) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = Math.min(1, (value || 0) / (max || 1));
+  const color = tone === 'emerald' ? 'var(--color-emerald-500)' : 'var(--primary)';
+  return (
+    <div className={`relative inline-flex items-center justify-center ${className}`} style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90" aria-hidden="true">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+          strokeDasharray={c} strokeDashoffset={c * (1 - pct)} style={{ transition: 'stroke-dashoffset 1s cubic-bezier(0.22,1,0.36,1)' }} />
+      </svg>
+      <div className="absolute text-center">
+        <span className="block text-2xl font-bold tabular-nums text-foreground">{Math.round(pct * 100)}%</span>
+        {label && <span className="mt-0.5 block text-[10px] font-medium text-muted-foreground">{label}</span>}
+      </div>
+    </div>
+  );
+}
+
 /* ───────────────────────── Icons ───────────────────────── */
 
 const mk = (path) => (props) => (
@@ -462,4 +611,54 @@ export const Icons = {
   Send: mk(<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />),
   Printer: mk(<path d="M7 8V4h10v4M7 18H5a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2h-2M7 14h10v6H7v-6z" />),
   Plus: mk(<path d="M12 5v14M5 12h14" />),
+  Pencil: mk(<path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />),
+  Trash: mk(<path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-1 0v12M9 7v12M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13" />),
+  Grid: mk(<path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z" />),
+  TrendingUp: mk(<path d="M3 17l6-6 4 4 8-8m0 0h-5m5 0v5" />),
 };
+
+/* ───────────────────────── Activity Ticker ───────────────────────── */
+export function ActivityTicker({ items = [] }) {
+  if (!items || items.length === 0) {
+    return (
+      <div className="relative w-full overflow-hidden border-b border-border bg-muted/20 py-2.5 text-center text-xs text-muted-foreground">
+        No recent file movements in this ward.
+      </div>
+    );
+  }
+
+  // Duplicate items to ensure smooth continuous marquee effect
+  const repeatedItems = [...items, ...items, ...items];
+
+  return (
+    <div className="relative w-full overflow-hidden border-b border-border bg-muted/25 py-2.5">
+      <div className="flex w-max animate-marquee whitespace-nowrap gap-12 text-xs font-medium text-muted-foreground select-none">
+        {repeatedItems.map((item, idx) => {
+          if (!item) return null;
+          const fileUid = item.fileId?.fileUid || 'File';
+          const title = item.fileId?.title || 'Untitled';
+          const action =
+            item.actionType === 'forward'
+              ? 'routed to'
+              : item.actionType === 'backtrack'
+              ? 'backtracked to'
+              : 'registered at';
+          const dest = item.toLocation || item.fromLocation || 'Reception';
+          
+          return (
+            <span key={idx} className="inline-flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-mono text-xs font-semibold text-primary">{fileUid}</span>
+              <span className="text-muted-foreground font-normal">{action}</span>
+              <span className="font-semibold text-foreground">{dest}</span>
+              <span className="opacity-60 font-normal">({title})</span>
+            </span>
+          );
+        })}
+      </div>
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-background to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-background to-transparent" />
+    </div>
+  );
+}
+

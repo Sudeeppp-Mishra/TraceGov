@@ -6,16 +6,19 @@ import {
   forwardFile,
   backtrackFile,
   searchFiles,
+  getOfficerInbox,
 } from '../controllers/fileController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
+import { validateRegisterFile, validateForward, validateBacktrack } from '../middleware/validation.js';
 
 const router = Router();
 
 // Apply auth and staff access to all routes under this controller
 router.use(authenticate, authorize('officer', 'admin'));
 
-// Registration and search endpoints
-router.post('/register', registerFile);
+// Inbox, registration and search endpoints
+router.get('/inbox', getOfficerInbox);
+router.post('/register', validateRegisterFile, registerFile);
 router.get('/search', searchFiles);
 
 // Summary & QR scan lookup endpoints
@@ -23,7 +26,7 @@ router.get('/dashboard/summary', getDashboardSummary);
 router.get('/scan/:identifier', scanFile);
 
 // File routing action endpoints
-router.post('/:id/forward', forwardFile);
-router.post('/:id/backtrack', backtrackFile);
+router.post('/:id/forward', validateForward, forwardFile);
+router.post('/:id/backtrack', validateBacktrack, backtrackFile);
 
 export default router;

@@ -1,13 +1,17 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
-import LoginPage from './pages/LoginPage';
-import OfficerDashboard from './pages/OfficerDashboard';
-import RegisterFilePage from './pages/RegisterFilePage';
 import CitizenTrackPage from './pages/CitizenTrackPage';
-import AIInsightsDashboard from './pages/AIInsightsDashboard';
-import AdminDashboard from './pages/AdminDashboard';
 import { getStoredUser } from './lib/api';
+import { Spinner } from './components/ui';
+
+// Lazy load heavy dashboard and portal components to optimize initial bundle sizes
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const OfficerDashboard = lazy(() => import('./pages/OfficerDashboard'));
+const OfficerInbox = lazy(() => import('./pages/OfficerInbox'));
+const RegisterFilePage = lazy(() => import('./pages/RegisterFilePage'));
+const AIInsightsDashboard = lazy(() => import('./pages/AIInsightsDashboard'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 
 /** Access guard restricting nested pages to authorized sessions. */
 function ProtectedRoute({ children, roles }) {
@@ -19,45 +23,64 @@ function ProtectedRoute({ children, roles }) {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/track" element={<CitizenTrackPage />} />
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <div className="flex flex-col items-center gap-3">
+            <Spinner className="h-8 w-8 text-primary" />
+            <p className="text-xs font-semibold text-muted-foreground animate-pulse">Loading TraceGov Portal...</p>
+          </div>
+        </div>
+      }
+    >
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/track" element={<CitizenTrackPage />} />
 
-      <Route
-        path="/officer"
-        element={
-          <ProtectedRoute roles={['officer', 'admin']}>
-            <OfficerDashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/register-file"
-        element={
-          <ProtectedRoute roles={['officer', 'admin']}>
-            <RegisterFilePage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/ai"
-        element={
-          <ProtectedRoute roles={['officer', 'admin']}>
-            <AIInsightsDashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin"
-        element={
-          <ProtectedRoute roles={['admin']}>
-            <AdminDashboard />
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="/officer"
+          element={
+            <ProtectedRoute roles={['officer', 'admin']}>
+              <OfficerDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/inbox"
+          element={
+            <ProtectedRoute roles={['officer', 'admin']}>
+              <OfficerInbox />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/register-file"
+          element={
+            <ProtectedRoute roles={['officer', 'admin']}>
+              <RegisterFilePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ai"
+          element={
+            <ProtectedRoute roles={['officer', 'admin']}>
+              <AIInsightsDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute roles={['admin']}>
+              <AdminDashboard />
+            </ProtectedRoute>
+          }
+        />
 
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }

@@ -2,9 +2,20 @@ import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import { connectDatabase, disconnectDatabase } from '../src/config/db.js';
 import { User, ROLES } from '../src/models/User.js';
+import { Department } from '../src/models/Department.js';
 
 // Load environment configuration
 dotenv.config();
+
+const SEED_DEPARTMENTS = [
+  { name: 'Reception', code: 'REC', description: 'Reception and physical file intake desk', wardCode: 'W01' },
+  { name: 'Verification Desk', code: 'VER', description: 'Document verification and citizen profile matching desk', wardCode: 'W01' },
+  { name: 'Ward Chair Section', code: 'WC', description: 'Final endorsement and ward authority section', wardCode: 'W01' },
+  { name: 'Tax Office Desk', code: 'TAX', description: 'Municipal revenue collection and tax clearance section', wardCode: 'W01' },
+  { name: 'Administrative Archives', code: 'ARC', description: 'Secure long-term document records storage and index archives', wardCode: 'W01' },
+  { name: 'Review Panel Office', code: 'REV', description: 'Dispute review and correction advisory panel', wardCode: 'W01' },
+  { name: 'Admin Office', code: 'ADM', description: 'Administrative oversight and system configuration desk', wardCode: 'W01' },
+];
 
 const SEED_USERS = [
   {
@@ -32,6 +43,18 @@ async function seedDatabase() {
   await connectDatabase();
 
   try {
+    // Seed Departments
+    for (const seedDept of SEED_DEPARTMENTS) {
+      const existingDept = await Department.findOne({ code: seedDept.code, wardCode: seedDept.wardCode });
+      if (existingDept) {
+        console.log(`Seeder: Department skipped (already exists): ${seedDept.code}`);
+        continue;
+      }
+      await Department.create(seedDept);
+      console.log(`Seeder: Successfully registered department -> ${seedDept.name} (${seedDept.code})`);
+    }
+
+    // Seed Users
     for (const seedUser of SEED_USERS) {
       const emailLower = seedUser.email.toLowerCase();
       const existingUser = await User.findOne({ email: emailLower });

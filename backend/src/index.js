@@ -8,7 +8,9 @@ import authRoutes from './routes/auth.js';
 import fileRoutes from './routes/files.js';
 import trackRoutes from './routes/track.js';
 import aiRoutes from './routes/ai.js';
+import departmentRoutes from './routes/departments.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
+import { secureHeaders } from './middleware/security.js';
 
 // Load environment configuration
 dotenv.config();
@@ -25,19 +27,44 @@ app.use(
   })
 );
 
+// Apply custom security headers
+app.use(secureHeaders);
+
 // Body parser
 app.use(express.json({ limit: '10mb' }));
 
 // Global Rate Limiting: max 150 requests per minute
-app.use(
-  rateLimit({
-    windowMs: 60 * 1000,
-    max: 150,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many requests, please try again later.' },
-  })
-);
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 150,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+
+// Authentication rate limiter: max 20 requests per 15 minutes (to mitigate brute-force attacks)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts, please try again after 15 minutes.' },
+});
+
+// Public citizen file tracking rate limiter: max 30 requests per minute (to mitigate scraping)
+const trackingLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many tracking attempts, please slow down.' },
+});
+
+// Mount Rate Limiters
+app.use('/api/', globalLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+app.use('/api/track', trackingLimiter);
 
 // Performance logging: warn when handlers exceed 1.5 seconds
 app.use((req, res, next) => {
@@ -65,6 +92,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/track', trackRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/departments', departmentRoutes);
 
 // Catch-all route for unhandled requests
 app.use((req, res) => {

@@ -2,9 +2,10 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
 /**
  * Returns JWT token from localStorage.
+ * Returns JWT token from sessionStorage.
  */
 function getToken() {
-  return localStorage.getItem('tracegov_token');
+  return sessionStorage.getItem('tracegov_token');
 }
 
 /**
@@ -29,7 +30,15 @@ async function request(path, options = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.error || `HTTP error encountered (${response.status})`);
+    if (response.status === 401) {
+      clearSession();
+      // Redirect to login page if user token is invalid or expired
+      window.location.href = '/login';
+    }
+    const errorMsg = data.details && Array.isArray(data.details)
+      ? data.details.map((d) => d.message).join(', ')
+      : data.error;
+    throw new Error(errorMsg || `HTTP error encountered (${response.status})`);
   }
 
   return data;
@@ -85,6 +94,28 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  getOfficerInbox: () => request('/files/inbox'),
+
+  // --- Departments API ---
+  getDepartments: () => request('/departments'),
+
+  createDepartment: (payload) =>
+    request('/departments', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateDepartment: (id, payload) =>
+    request(`/departments/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteDepartment: (id) =>
+    request(`/departments/${id}`, {
+      method: 'DELETE',
+    }),
+
   // --- Citizen Public API ---
   trackCitizen: (trackingId) => request(`/track/${trackingId}`),
 
@@ -128,17 +159,17 @@ export const api = {
 // --- Session Cache Helpers ---
 
 export function saveSession(token, user) {
-  localStorage.setItem('tracegov_token', token);
-  localStorage.setItem('tracegov_user', JSON.stringify(user));
+  sessionStorage.setItem('tracegov_token', token);
+  sessionStorage.setItem('tracegov_user', JSON.stringify(user));
 }
 
 export function clearSession() {
-  localStorage.removeItem('tracegov_token');
-  localStorage.removeItem('tracegov_user');
+  sessionStorage.removeItem('tracegov_token');
+  sessionStorage.removeItem('tracegov_user');
 }
 
 export function getStoredUser() {
-  const userJson = localStorage.getItem('tracegov_user');
+  const userJson = sessionStorage.getItem('tracegov_user');
   try {
     return userJson ? JSON.parse(userJson) : null;
   } catch (err) {

@@ -50,8 +50,28 @@ export async function registerFile(req, res, next) {
       return res.status(400).json({ error: 'Citizen phone number must be exactly 10 digits' });
     }
 
-    const fileUid = generateFileUid();
-    const trackingId = generateTrackingId();
+    let fileUid = '';
+    let trackingId = '';
+    let isUnique = false;
+    let attempts = 0;
+
+    while (!isUnique && attempts < 10) {
+      fileUid = generateFileUid();
+      trackingId = generateTrackingId();
+      
+      const existing = await File.findOne({
+        $or: [{ fileUid }, { trackingId }],
+      });
+      if (!existing) {
+        isUnique = true;
+      }
+      attempts++;
+    }
+
+    if (!isUnique) {
+      return res.status(500).json({ error: 'Unique identifier generation failed. Please try again.' });
+    }
+
     const wardCode = req.user.wardCode || 'W01';
     const currentLocation = req.user.deskLocation || 'Reception';
 
@@ -85,6 +105,7 @@ export async function registerFile(req, res, next) {
     });
 
     return res.status(201).json({
+      success: true,
       file: {
         id: file._id,
         fileUid: file.fileUid,
@@ -231,6 +252,7 @@ export async function getDashboardSummary(req, res, next) {
     });
 
     return res.json({
+      success: true,
       wardCode,
       generatedAt: new Date().toISOString(),
       metrics: {
@@ -303,6 +325,7 @@ export async function scanFile(req, res, next) {
     const integrityReport = await verifyLogChain(file._id);
 
     return res.json({
+      success: true,
       file: {
         id: file._id,
         fileUid: file.fileUid,
@@ -326,64 +349,94 @@ export async function scanFile(req, res, next) {
 }
 
 /**
+ * Helper to run write operations inside a session transaction.
+ * Automatically falls back to standard non-transactional writes if
+ * MongoDB is running in standalone mode (no replica sets configured).
+ */
+async function runTransactionalWrite(operationsFn) {
+  const session = await mongoose.startSession();
+  try {
+    session.startTransaction();
+    const result = await operationsFn(session);
+    await session.commitTransaction();
+    session.endSession();
+    return result;
+  } catch (err) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    session.endSession();
+
+    if (err.message.includes('replica set') || err.message.includes('Transaction numbers')) {
+      console.warn('[TRANSACTION FALLBACK] MongoDB running in standalone mode. Executing operations without transaction.');
+      return await operationsFn(null);
+    }
+    throw err;
+  }
+}
+
+/**
  * Forward a file to another desk or location.
  */
 export async function forwardFile(req, res, next) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const { nextLocation, nextStatus = FILE_STATUSES.PENDING, notes } = req.body;
 
-    if (!nextLocation) {
-      await session.abortTransaction();
-      session.endSession();
+    const isFinalStatus = [FILE_STATUSES.APPROVED, FILE_STATUSES.DISPATCHED, FILE_STATUSES.REJECTED].includes(nextStatus);
+
+    if (!nextLocation && !isFinalStatus) {
       return res.status(400).json({ error: 'nextLocation is required' });
     }
 
-    const file = await File.findById(req.params.id).session(session);
-    if (!file) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ error: 'File not found' });
-    }
+    const result = await runTransactionalWrite(async (session) => {
+      const file = await File.findById(req.params.id).session(session);
+      if (!file) {
+        throw new Error('File not found');
+      }
 
-    const previousLocation = file.currentLocation;
-    file.currentLocation = nextLocation;
-    file.currentStatus = nextStatus;
-    await file.save({ session });
+      const previousLocation = file.currentLocation;
+      const targetLocation = nextLocation || file.currentLocation;
+      file.currentLocation = targetLocation;
+      file.currentStatus = nextStatus;
+      if (isFinalStatus) {
+        file.isClosed = true;
+      } else {
+        file.isClosed = false;
+      }
+      await file.save({ session });
 
-    // Append to ledger inside the session
-    const logEntry = await appendMovementLog({
-      fileId: file._id,
-      officerId: req.user._id,
-      actionType: nextStatus,
-      currentLocation: nextLocation,
-      previousLocation,
-      nextLocation,
-      notes,
-      session,
+      const logEntry = await appendMovementLog({
+        fileId: file._id,
+        officerId: req.user._id,
+        actionType: nextStatus,
+        currentLocation: targetLocation,
+        previousLocation,
+        nextLocation: targetLocation,
+        notes,
+        session,
+      });
+
+      return { file, logEntry };
     });
 
-    await session.commitTransaction();
-    session.endSession();
-
     return res.json({
+      success: true,
       file: {
-        id: file._id,
-        fileUid: file.fileUid,
-        currentStatus: file.currentStatus,
-        currentLocation: file.currentLocation,
+        id: result.file._id,
+        fileUid: result.file.fileUid,
+        currentStatus: result.file.currentStatus,
+        currentLocation: result.file.currentLocation,
       },
       movement: {
-        actionType: logEntry.actionType,
-        timestamp: logEntry.timestamp,
-        entryHash: logEntry.entryHash,
+        actionType: result.logEntry.actionType,
+        timestamp: result.logEntry.timestamp,
+        entryHash: result.logEntry.entryHash,
       },
     });
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
+    if (err.message === 'File not found') {
+      return res.status(404).json({ error: 'File not found' });
+    }
     next(err);
   }
 }
@@ -392,63 +445,59 @@ export async function forwardFile(req, res, next) {
  * Backtrack a file (reject/return for correction with a description reason).
  */
 export async function backtrackFile(req, res, next) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const { returnLocation, backtrackReason, internalNotes } = req.body;
 
     if (!returnLocation || !backtrackReason) {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(400).json({ error: 'returnLocation and backtrackReason are required' });
     }
 
-    const file = await File.findById(req.params.id).session(session);
-    if (!file) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ error: 'File not found' });
-    }
+    const result = await runTransactionalWrite(async (session) => {
+      const file = await File.findById(req.params.id).session(session);
+      if (!file) {
+        throw new Error('File not found');
+      }
 
-    const previousLocation = file.currentLocation;
-    file.currentLocation = returnLocation;
-    file.currentStatus = FILE_STATUSES.BACKTRACKED;
-    await file.save({ session });
+      const previousLocation = file.currentLocation;
+      file.currentLocation = returnLocation;
+      file.currentStatus = FILE_STATUSES.BACKTRACKED;
+      await file.save({ session });
 
-    // Append ledger entry (marked as backtracked)
-    const logEntry = await appendMovementLog({
-      fileId: file._id,
-      officerId: req.user._id,
-      actionType: FILE_STATUSES.BACKTRACKED,
-      currentLocation: returnLocation,
-      previousLocation,
-      backtrackReason,
-      internalNotes,
-      notes: `Backtracked: ${backtrackReason}`,
-      session,
+      // Append ledger entry (marked as backtracked)
+      const logEntry = await appendMovementLog({
+        fileId: file._id,
+        officerId: req.user._id,
+        actionType: FILE_STATUSES.BACKTRACKED,
+        currentLocation: returnLocation,
+        previousLocation,
+        backtrackReason,
+        internalNotes,
+        notes: `Backtracked: ${backtrackReason}`,
+        session,
+      });
+
+      return { file, logEntry };
     });
 
-    await session.commitTransaction();
-    session.endSession();
-
     return res.json({
+      success: true,
       file: {
-        id: file._id,
-        fileUid: file.fileUid,
-        currentStatus: file.currentStatus,
-        currentLocation: file.currentLocation,
+        id: result.file._id,
+        fileUid: result.file.fileUid,
+        currentStatus: result.file.currentStatus,
+        currentLocation: result.file.currentLocation,
       },
       movement: {
-        actionType: logEntry.actionType,
-        backtrackReason: logEntry.backtrackReason,
-        timestamp: logEntry.timestamp,
-        entryHash: logEntry.entryHash,
+        actionType: result.logEntry.actionType,
+        backtrackReason: result.logEntry.backtrackReason,
+        timestamp: result.logEntry.timestamp,
+        entryHash: result.logEntry.entryHash,
       },
     });
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
+    if (err.message === 'File not found') {
+      return res.status(404).json({ error: 'File not found' });
+    }
     next(err);
   }
 }
@@ -481,8 +530,32 @@ export async function searchFiles(req, res, next) {
       .limit(Math.min(Number(limit), 50))
       .lean();
 
-    return res.json({ files, count: files.length });
+    return res.json({ success: true, files, count: files.length });
   } catch (err) {
     next(err);
   }
 }
+
+/**
+ * Retrieve all open files for the officer's ward to populate the workspace inbox queues.
+ */
+export async function getOfficerInbox(req, res, next) {
+  try {
+    const wardCode = req.user.wardCode;
+
+    // Fetch all open files in this ward, ordered by most recently updated
+    const files = await File.find({ wardCode, isClosed: false })
+      .sort({ updatedAt: -1 })
+      .populate('assignedOfficerId', 'name deskLocation')
+      .lean();
+
+    return res.json({
+      success: true,
+      files,
+      count: files.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+

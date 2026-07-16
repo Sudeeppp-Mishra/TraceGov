@@ -90,13 +90,21 @@ export function AppShell({ user, children, kicker }) {
           <div className="flex items-center gap-2">
             <ThemeToggle className="hidden sm:flex" />
             {user && (
-              <div className="hidden items-center gap-2.5 rounded-lg border border-border bg-card py-1 pl-1 pr-2.5 sm:flex">
-                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-[11px] font-bold text-primary-foreground">
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-card py-1 pl-1 pr-2 sm:gap-2.5 sm:pr-2.5">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
                   {user.name?.[0]?.toUpperCase() || 'O'}
                 </span>
-                <div className="leading-tight">
+                {/* Full identity — shown from sm upward */}
+                <div className="hidden leading-tight sm:block">
                   <p className="text-xs font-semibold text-foreground">{user.name}</p>
-                  <p className="text-[10px] text-muted-foreground">Ward {user.wardCode} · {user.deskLocation}</p>
+                  <p className="text-xs text-muted-foreground">Ward {user.wardCode} · {user.deskLocation}</p>
+                </div>
+                {/* Compact identity — mobile only, keeps the header from getting crowded */}
+                <div className="block leading-tight sm:hidden">
+                  <p className="max-w-[92px] truncate text-xs font-semibold text-foreground">{user.name}</p>
+                  <p className="max-w-[92px] truncate text-xs capitalize text-muted-foreground">
+                    {user.role}{user.wardCode ? ` · W${user.wardCode}` : ''}
+                  </p>
                 </div>
               </div>
             )}
@@ -152,10 +160,21 @@ export function AppShell({ user, children, kicker }) {
 }
 
 /* ───────────── Page heading ───────────── */
-export function PageHeading({ title, description, actions, className = '' }) {
+// `breadcrumbs` is optional — an array of strings, last one treated as the current page.
+export function PageHeading({ title, description, actions, breadcrumbs, className = '' }) {
   return (
     <div className={`flex flex-col justify-between gap-4 sm:flex-row sm:items-end ${className}`}>
       <div>
+        {breadcrumbs && breadcrumbs.length > 0 && (
+          <nav aria-label="Breadcrumb" className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            {breadcrumbs.map((crumb, idx) => (
+              <span key={crumb} className="flex items-center gap-1.5">
+                {idx > 0 && <Icons.ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />}
+                <span className={idx === breadcrumbs.length - 1 ? 'font-semibold text-foreground' : ''}>{crumb}</span>
+              </span>
+            ))}
+          </nav>
+        )}
         <h1 className="text-2xl font-bold tracking-tight text-foreground">{title}</h1>
         {description && <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">{description}</p>}
       </div>

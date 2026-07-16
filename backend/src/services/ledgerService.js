@@ -14,6 +14,7 @@ export async function appendMovementLog({
   internalNotes,
   backtrackReason,
   nextLocation,
+  timestamp,
   session,
 }) {
   // Find the last record for this file to link hashes
@@ -23,7 +24,10 @@ export async function appendMovementLog({
     .session(session || null)
     .lean();
 
-  const timestamp = new Date();
+  // Optional explicit timestamp (used by the demo seeder to build realistic,
+  // backdated ledger history). Defaults to "now" for all production call
+  // sites (registerFile/forwardFile/backtrackFile), matching prior behavior.
+  const entryTimestamp = timestamp instanceof Date ? timestamp : new Date();
   const previousHash = lastEntry?.entryHash || 'GENESIS';
 
   const entryDraft = {
@@ -32,7 +36,7 @@ export async function appendMovementLog({
     actionType,
     currentLocation,
     previousLocation,
-    timestamp,
+    timestamp: entryTimestamp,
     notes,
     internalNotes,
     backtrackReason,

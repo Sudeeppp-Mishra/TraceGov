@@ -52,6 +52,7 @@ export default function OfficerInbox() {
     <AppShell user={currentUser} kicker={currentUser ? `Ward ${currentUser.wardCode}` : ''}>
       <Container size="wide" className="space-y-6 pt-8">
         <PageHeading
+          breadcrumbs={['Workspace', 'Inbox']}
           title="Inbox"
           description={deskLocation ? `Files awaiting action at the ${deskLocation}.` : 'Files awaiting action across your ward.'}
           actions={<Button variant="outline" onClick={() => load(currentUser.wardCode)}><Icons.Zap className="h-4 w-4" /> Refresh</Button>}
@@ -82,19 +83,26 @@ export default function OfficerInbox() {
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px] text-muted-foreground">{file.fileUid}</span>
+                        <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
                         <Badge status={file.currentStatus} />
                       </div>
                       <p className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold text-foreground">
                         <span className="truncate">{file.title}</span>
-                        {!['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
+                        {file.currentStatus === 'Backtracked' ? (
+                          // Animated pulse reserved for files that genuinely need attention now.
                           <span className="relative flex h-2 w-2 shrink-0">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
                           </span>
+                        ) : (
+                          !['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
+                            // Calmer, static indicator for other in-progress files — avoids a whole
+                            // list of rows pulsing at once.
+                            <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-sky-500" aria-hidden="true" />
+                          )
                         )}
                       </p>
-                      <p className="truncate text-[11px] text-muted-foreground">{file.citizenName} · {file.currentLocation}</p>
+                      <p className="truncate text-xs text-muted-foreground">{file.citizenName} · {file.currentLocation}</p>
                     </div>
                     <Icons.ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
                   </button>
@@ -114,7 +122,7 @@ export default function OfficerInbox() {
                     <span className={`font-semibold ${dept._id === deskLocation ? 'text-primary' : 'text-foreground'}`}>{dept._id}</span>
                     <div className="flex items-center gap-2">
                       {dept.pending > 0 && <Chip className="!px-1.5 !py-0.5">{dept.pending} delayed</Chip>}
-                      <span className="rounded bg-muted px-2 py-0.5 text-[11px] font-bold text-foreground">{dept.count}</span>
+                      <span className="rounded bg-muted px-2 py-0.5 text-xs font-bold text-foreground">{dept.count}</span>
                     </div>
                   </div>
                 ))}

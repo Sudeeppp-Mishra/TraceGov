@@ -311,7 +311,7 @@ export default function CitizenTrackPage() {
 
       <main className="pb-20">
         <section className="relative overflow-hidden border-b border-border">
-          <div className="pointer-events-none absolute inset-0 bg-grid mask-fade-b opacity-50" aria-hidden="true" />
+          <div className="pointer-events-none absolute left-1/2 top-0 h-72 w-[640px] -translate-x-1/2 rounded-full bg-emerald-500/10 blur-[110px]" aria-hidden="true" />
           <Container className="relative py-14 md:py-20">
             <div className="mx-auto max-w-2xl text-center">
               <SectionLabel>Citizen portal</SectionLabel>

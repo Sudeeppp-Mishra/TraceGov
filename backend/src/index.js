@@ -9,6 +9,7 @@ import fileRoutes from './routes/files.js';
 import trackRoutes from './routes/track.js';
 import aiRoutes from './routes/ai.js';
 import departmentRoutes from './routes/departments.js';
+import statsRoutes from './routes/stats.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
 import { secureHeaders } from './middleware/security.js';
 
@@ -93,6 +94,7 @@ app.use('/api/files', fileRoutes);
 app.use('/api/track', trackRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/departments', departmentRoutes);
+app.use('/api/stats', statsRoutes);
 
 // Catch-all route for unhandled requests
 app.use((req, res) => {

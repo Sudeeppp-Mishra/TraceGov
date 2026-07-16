@@ -51,7 +51,6 @@ export default function LoginPage() {
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* Left brand panel */}
       <aside className="relative hidden overflow-hidden bg-navy-900 lg:flex lg:flex-col lg:justify-between lg:p-12">
-        <div className="pointer-events-none absolute inset-0 bg-grid opacity-[0.15]" aria-hidden="true" />
         <div className="pointer-events-none absolute -left-20 top-1/3 h-72 w-72 rounded-full bg-emerald-500/20 blur-3xl" aria-hidden="true" />
         <div className="relative">
           <Link to="/" className="inline-flex items-center gap-2.5">

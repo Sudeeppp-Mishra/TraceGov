@@ -47,6 +47,7 @@ export default function AIInsightsDashboard() {
     <AppShell user={currentUser} kicker="AI Insights">
       <Container size="wide" className="space-y-8 pt-8">
         <PageHeading
+          breadcrumbs={['Workspace', 'AI Insights']}
           title="Operational congestion analytics"
           description="Predictions on delays, bottlenecks and completion times based on live desk queues and movement logs."
           actions={<Button variant="outline" onClick={() => loadTelemetry(currentUser.wardCode)}><Icons.Zap className="h-4 w-4" /> Refresh</Button>}
@@ -123,11 +124,11 @@ export default function AIInsightsDashboard() {
                     <p className="rounded-xl border border-border/50 bg-muted/40 p-3.5 text-sm font-medium leading-relaxed text-foreground">{aiInsights.recommendation}</p>
                     <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
                       <div>
-                        <span className="text-[10px] font-semibold uppercase text-muted-foreground">Bottleneck area</span>
+                        <span className="text-xs font-semibold uppercase text-muted-foreground">Bottleneck area</span>
                         <span className="mt-0.5 block font-bold text-foreground">{aiInsights.bottleneckDepartment}</span>
                       </div>
                       <div>
-                        <span className="text-[10px] font-semibold uppercase text-muted-foreground">Delay probability</span>
+                        <span className="text-xs font-semibold uppercase text-muted-foreground">Delay probability</span>
                         <span className="mt-0.5 block font-bold text-foreground">{aiInsights.delayProbability}%</span>
                       </div>
                     </div>
@@ -144,8 +145,8 @@ export default function AIInsightsDashboard() {
                       {highRiskFiles.map((file) => (
                         <div key={file.fileUid} className="py-3.5 text-xs first:pt-0 last:pb-0">
                           <div className="flex items-start justify-between gap-2">
-                            <span className="font-mono text-[9px] text-muted-foreground">{file.fileUid}</span>
-                            <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-red-500">{file.ai?.risk?.score || 85}% risk</span>
+                            <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
+                            <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-xs font-semibold text-red-500">{file.ai?.risk?.score || 85}% risk</span>
                           </div>
                           <p className="mt-1.5 flex items-center gap-1.5 font-bold text-foreground">
                             <span className="truncate">{file.title}</span>
@@ -156,11 +157,11 @@ export default function AIInsightsDashboard() {
                               </span>
                             )}
                           </p>
-                          <p className="mt-0.5 text-[10px] text-muted-foreground">At <strong>{file.currentLocation}</strong> · {file.currentStatus}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">At <strong>{file.currentLocation}</strong> · {file.currentStatus}</p>
                           {file.ai?.missingDocuments?.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1">
                               {file.ai.missingDocuments.map((doc) => (
-                                <span key={doc} className="rounded bg-muted px-2 py-0.5 text-[9px] text-muted-foreground">Missing {doc}</span>
+                                <span key={doc} className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">Missing {doc}</span>
                               ))}
                             </div>
                           )}

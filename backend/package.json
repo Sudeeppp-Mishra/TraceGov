@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "seed": "node scripts/seed.js"
+    "seed": "node scripts/seed.js",
+    "seed:demo": "node scripts/seed.js --demo",
+    "seed:demo:reset": "node scripts/seed.js --demo --reset",
+    "migrate:drop-stale-index": "node scripts/migrate-drop-stale-index.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -16,7 +19,6 @@
     "express-rate-limit": "^7.5.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.3",
-    "qrcode": "^1.5.4",
-    "uuid": "^11.0.5"
+    "qrcode": "^1.5.4"
   }
 }

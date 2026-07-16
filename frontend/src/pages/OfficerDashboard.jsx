@@ -4,7 +4,7 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { api, getStoredUser } from '../lib/api';
 import {
   Container, Card, Button, Input, Select, Textarea, Badge, Modal, Icons,
-  StatCard, Skeleton, EmptyState, Timeline, TimelineItem, useToast,
+  StatCard, Skeleton, EmptyState, Timeline, TimelineItem, useToast, Spinner,
 } from '../components/ui';
 import { AppShell, PageHeading } from '../components/layout';
 
@@ -24,6 +24,7 @@ export default function OfficerDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [activeResultIndex, setActiveResultIndex] = useState(-1);
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedFileHistory, setSelectedFileHistory] = useState([]);
   const [isAuditValid, setIsAuditValid] = useState(true);
@@ -41,6 +42,7 @@ export default function OfficerDashboard() {
   const [checkingAi, setCheckingAi] = useState(false);
 
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scannerInitializing, setScannerInitializing] = useState(false);
   const qrScannerRef = useRef(null);
   const [scannerError, setScannerError] = useState('');
 
@@ -87,12 +89,13 @@ export default function OfficerDashboard() {
   };
 
   useEffect(() => {
-    if (!searchQuery.trim()) { setSearchResults([]); setSearching(false); return; }
+    if (!searchQuery.trim()) { setSearchResults([]); setSearching(false); setActiveResultIndex(-1); return; }
     setSearching(true);
     const timer = setTimeout(async () => {
       try {
         const response = await api.searchFiles({ q: searchQuery });
         setSearchResults(response.files || []);
+        setActiveResultIndex(-1);
       } catch { /* ignore */ } finally { setSearching(false); }
     }, 300);
     return () => clearTimeout(timer);
@@ -109,11 +112,32 @@ export default function OfficerDashboard() {
       setNextStatus('Pending');
       setBacktrackReason(''); setInternalNotes(''); setAiDelayReport(null); setAiBacktrackSuggest(null);
       setActionTab('forward');
-      setSearchQuery(''); setSearchResults([]);
+      setSearchQuery(''); setSearchResults([]); setActiveResultIndex(-1);
     } catch (err) {
       toast.error(err.message || 'Error loading file.');
     } finally {
       setFileLoading(false);
+    }
+  };
+
+  // Keyboard support for the search results combobox: Arrow keys move the
+  // active option, Enter selects it, Escape clears the results.
+  const handleSearchKeyDown = (e) => {
+    if (searchResults.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveResultIndex((i) => (i + 1 >= searchResults.length ? 0 : i + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveResultIndex((i) => (i - 1 < 0 ? searchResults.length - 1 : i - 1));
+    } else if (e.key === 'Enter') {
+      if (activeResultIndex >= 0 && searchResults[activeResultIndex]) {
+        e.preventDefault();
+        handleSelectFile(searchResults[activeResultIndex].fileUid);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setSearchQuery(''); setSearchResults([]); setActiveResultIndex(-1);
     }
   };
 
@@ -174,6 +198,7 @@ export default function OfficerDashboard() {
   const startCameraScanner = () => {
     setIsScannerOpen(true);
     setScannerError('');
+    setScannerInitializing(true);
     setTimeout(() => {
       const html5QrCode = new Html5Qrcode('qr-reader-container');
       qrScannerRef.current = html5QrCode;
@@ -182,12 +207,14 @@ export default function OfficerDashboard() {
         { fps: 10, qrbox: { width: 220, height: 220 } },
         (decodedText) => { stopCameraScanner(); handleSelectFile(decodedText); },
         () => {}
-      ).catch(() => setScannerError('Could not access camera. Please check hardware permissions.'));
+      ).then(() => setScannerInitializing(false))
+        .catch(() => { setScannerInitializing(false); setScannerError('Could not access camera. Please check hardware permissions.'); });
     }, 300);
   };
 
   const stopCameraScanner = () => {
     setIsScannerOpen(false);
+    setScannerInitializing(false);
     if (qrScannerRef.current) {
       qrScannerRef.current.stop().then(() => { qrScannerRef.current = null; }).catch(() => {});
     }
@@ -203,6 +230,7 @@ export default function OfficerDashboard() {
     <AppShell user={currentUser} kicker={currentUser ? `Ward ${currentUser.wardCode}` : ''}>
       <Container size="wide" className="space-y-8 pt-8">
         <PageHeading
+          breadcrumbs={['Workspace']}
           title="Officer workspace"
           description="Search, scan and route physical files across ward desks with a full audit trail."
           actions={<Button variant="primary" onClick={() => navigate('/register-file')}><Icons.Plus className="h-4 w-4" /> Register file</Button>}
@@ -228,7 +256,14 @@ export default function OfficerDashboard() {
                 <Input
                   className="flex-1" icon={<Icons.Search className="h-4 w-4" />}
                   placeholder="Search by citizen, title, UID or tracking ID…"
-                  value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} aria-label="Search files"
+                  value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  aria-label="Search files"
+                  role="combobox"
+                  aria-expanded={searchResults.length > 0}
+                  aria-controls="officer-search-listbox"
+                  aria-autocomplete="list"
+                  aria-activedescendant={activeResultIndex >= 0 ? `officer-search-option-${activeResultIndex}` : undefined}
                 />
                 <Button variant="outline" onClick={startCameraScanner} className="shrink-0">
                   <Icons.Scan className="h-4 w-4" /> <span className="hidden sm:inline">Scan</span>
@@ -239,12 +274,21 @@ export default function OfficerDashboard() {
                   {searching && searchResults.length === 0 ? (
                     <div className="space-y-2 p-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
                   ) : (
-                    <div className="divide-y divide-border">
-                      {searchResults.map((file) => (
-                        <button key={file.fileUid} onClick={() => handleSelectFile(file.fileUid)}
-                          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted cursor-pointer">
+                    <div id="officer-search-listbox" role="listbox" aria-label="Matching files" className="divide-y divide-border">
+                      {searchResults.map((file, idx) => (
+                        <button
+                          key={file.fileUid}
+                          id={`officer-search-option-${idx}`}
+                          role="option"
+                          aria-selected={idx === activeResultIndex}
+                          onClick={() => handleSelectFile(file.fileUid)}
+                          onMouseEnter={() => setActiveResultIndex(idx)}
+                          className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors cursor-pointer ${
+                            idx === activeResultIndex ? 'bg-muted' : 'hover:bg-muted'
+                          }`}
+                        >
                           <div className="min-w-0">
-                            <span className="font-mono text-[10px] text-muted-foreground">{file.fileUid}</span>
+                            <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
                             <span className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold text-foreground">
                               <span className="truncate">{file.title}</span>
                               {!['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
@@ -254,7 +298,7 @@ export default function OfficerDashboard() {
                                 </span>
                               )}
                             </span>
-                            <span className="text-[11px] text-muted-foreground">{file.citizenName} · {file.currentLocation}</span>
+                            <span className="text-xs text-muted-foreground">{file.citizenName} · {file.currentLocation}</span>
                           </div>
                           <Badge status={file.currentStatus} />
                         </button>
@@ -274,8 +318,8 @@ export default function OfficerDashboard() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-[10px] text-muted-foreground">{selectedFile.fileUid}</span>
-                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-semibold ${isAuditValid ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400'}`}>
+                        <span className="font-mono text-xs text-muted-foreground">{selectedFile.fileUid}</span>
+                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${isAuditValid ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400'}`}>
                           <Icons.ShieldCheck className="h-3 w-3" /> {isAuditValid ? 'Ledger verified' : 'Integrity fail'}
                         </span>
                       </div>
@@ -359,15 +403,15 @@ export default function OfficerDashboard() {
                             {aiDelayReport && (
                               <div className="grid gap-4 sm:grid-cols-3">
                                 <div className="rounded-xl border border-border bg-muted/40 p-3">
-                                  <span className="text-[9px] font-semibold uppercase text-muted-foreground">Delay risk</span>
+                                  <span className="text-xs font-semibold uppercase text-muted-foreground">Delay risk</span>
                                   <span className={`mt-1 block text-xl font-bold ${aiDelayReport.delayProbability > 70 ? 'text-red-500' : aiDelayReport.delayProbability > 40 ? 'text-amber-500' : 'text-emerald-500'}`}>{aiDelayReport.delayProbability}%</span>
                                 </div>
                                 <div className="rounded-xl border border-border bg-muted/40 p-3">
-                                  <span className="text-[9px] font-semibold uppercase text-muted-foreground">Expected dwell</span>
+                                  <span className="text-xs font-semibold uppercase text-muted-foreground">Expected dwell</span>
                                   <span className="mt-1 block text-xl font-bold text-foreground">{aiDelayReport.expectedProcessingHours}h</span>
                                 </div>
                                 <div className="rounded-xl border border-border bg-muted/40 p-3">
-                                  <span className="text-[9px] font-semibold uppercase text-muted-foreground">Confidence</span>
+                                  <span className="text-xs font-semibold uppercase text-muted-foreground">Confidence</span>
                                   <span className="mt-1 block text-xl font-bold capitalize text-foreground">{aiDelayReport.confidenceScore}</span>
                                 </div>
                               </div>
@@ -379,7 +423,7 @@ export default function OfficerDashboard() {
                                 {aiBacktrackSuggest.missingDocuments?.length > 0 && (
                                   <div className="mt-3 flex flex-wrap gap-2">
                                     {aiBacktrackSuggest.missingDocuments.map((doc) => (
-                                      <span key={doc} className="rounded bg-red-500/10 px-2 py-0.5 text-[9px] font-semibold text-red-500">{doc}</span>
+                                      <span key={doc} className="rounded bg-red-500/10 px-2 py-0.5 text-xs font-semibold text-red-500">{doc}</span>
                                     ))}
                                   </div>
                                 )}
@@ -407,7 +451,7 @@ export default function OfficerDashboard() {
                           meta={new Date(item.timestamp).toLocaleString()}
                           tone={item.actionType === 'Backtracked' ? 'red' : 'primary'}
                           last={idx === selectedFileHistory.length - 1}>
-                          <p className="text-[11px] font-medium text-foreground/70">{item.currentLocation} · {item.officerId?.name}</p>
+                          <p className="text-xs font-medium text-foreground/70">{item.currentLocation} · {item.officerId?.name}</p>
                           {item.notes && <p className="mt-1">{item.notes}</p>}
                         </TimelineItem>
                       ))}
@@ -438,7 +482,7 @@ export default function OfficerDashboard() {
                   {recentHistory.map((hist, idx) => (
                     <div key={idx} className="py-3 text-xs first:pt-0 last:pb-0">
                       <div className="flex items-start justify-between gap-2">
-                        <span className="font-mono text-[9px] text-muted-foreground">{hist.fileId?.fileUid}</span>
+                        <span className="font-mono text-xs text-muted-foreground">{hist.fileId?.fileUid}</span>
                         <Badge status={hist.actionType} dot={false} />
                       </div>
                       <p className="mt-1 flex items-center gap-1.5 font-semibold text-foreground">
@@ -450,7 +494,7 @@ export default function OfficerDashboard() {
                           </span>
                         )}
                       </p>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">{hist.officerId?.name} · {hist.currentLocation}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{hist.officerId?.name} · {hist.currentLocation}</p>
                     </div>
                   ))}
                 </div>
@@ -469,8 +513,8 @@ export default function OfficerDashboard() {
                     <div key={dept._id} className="flex items-center justify-between text-xs">
                       <span className="font-semibold text-foreground">{dept._id}</span>
                       <div className="flex gap-2">
-                        {dept.pending > 0 && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500">{dept.pending} delayed</span>}
-                        <span className="rounded bg-muted px-2 py-0.5 text-[11px] font-bold text-foreground">{dept.count}</span>
+                        {dept.pending > 0 && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-xs font-semibold text-amber-500">{dept.pending} delayed</span>}
+                        <span className="rounded bg-muted px-2 py-0.5 text-xs font-bold text-foreground">{dept.count}</span>
                       </div>
                     </div>
                   ))}
@@ -485,7 +529,15 @@ export default function OfficerDashboard() {
 
       <Modal isOpen={isScannerOpen} onClose={stopCameraScanner} title="Scan QR tag" description="Center the printed QR tag in the viewfinder.">
         <div className="space-y-4">
-          <div id="qr-reader-container" className="mx-auto aspect-square max-w-[280px] overflow-hidden rounded-xl border border-border bg-black" />
+          <div className="relative mx-auto aspect-square max-w-[280px] overflow-hidden rounded-xl border border-border bg-black">
+            <div id="qr-reader-container" className="h-full w-full" />
+            {scannerInitializing && !scannerError && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-black/80">
+                <Spinner className="h-6 w-6 text-white" />
+                <p className="text-xs font-medium text-white/80">Starting camera…</p>
+              </div>
+            )}
+          </div>
           {scannerError && <p className="text-center text-xs font-semibold text-red-500">{scannerError}</p>}
           <div className="flex justify-end"><Button variant="secondary" onClick={stopCameraScanner}>Cancel</Button></div>
         </div>

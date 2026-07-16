@@ -197,6 +197,7 @@ export default function AdminDashboard() {
     <AppShell user={currentUser} kicker="Administration">
       <Container size="wide" className="space-y-8 pt-8">
         <PageHeading
+          breadcrumbs={['Administration']}
           title={`Ward ${currentUser?.wardCode || ''} Administration`}
           description="Manage ward officers, monitor throughput, and verify cryptographic ledger integrity."
           actions={
@@ -250,46 +251,79 @@ export default function AdminDashboard() {
                   {filesUnderAudit.length === 0 ? (
                     <EmptyState className="m-4 border-0" icon={<Icons.FileText className="h-6 w-6" />} title="No files to audit" description="Registered files appear here for ledger verification." />
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs">
-                        <thead>
-                          <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
-                            <th className="px-6 py-3 font-semibold">File UID</th>
-                            <th className="px-2 py-3 font-semibold">Title</th>
-                            <th className="px-2 py-3 font-semibold">Desk</th>
-                            <th className="px-6 py-3 text-right font-semibold">Chain</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border/60">
-                          {filesUnderAudit.map((file) => (
-                            <tr key={file.fileUid} className="transition-colors hover:bg-muted/30">
-                              <td className="px-6 py-3 font-mono text-[10px] text-muted-foreground">{file.fileUid}</td>
-                              <td className="max-w-[160px] px-2 py-3 font-semibold text-foreground">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="truncate">{file.title}</span>
-                                  {!['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
-                                    <span className="relative flex h-1.5 w-1.5 shrink-0">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
-                                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500"></span>
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-2 py-3 text-muted-foreground">{file.currentLocation}</td>
-                              <td className="px-6 py-3 text-right">
-                                {file.isValidated ? (
-                                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${file.isChainIntact ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400'}`}>
-                                    {file.isChainIntact ? <><Icons.Check className="h-3 w-3" /> Intact</> : <><Icons.AlertCircle className="h-3 w-3" /> Tampered</>}
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] italic text-muted-foreground">Not checked</span>
-                                )}
-                              </td>
+                    <>
+                      {/* Desktop / tablet: full table */}
+                      <div className="hidden overflow-x-auto sm:block">
+                        <table className="w-full text-left text-sm">
+                          <thead>
+                            <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
+                              <th className="px-6 py-3 font-semibold">File UID</th>
+                              <th className="px-2 py-3 font-semibold">Title</th>
+                              <th className="px-2 py-3 font-semibold">Desk</th>
+                              <th className="px-6 py-3 text-right font-semibold">Chain</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                          </thead>
+                          <tbody className="divide-y divide-border/60">
+                            {filesUnderAudit.map((file) => (
+                              <tr key={file.fileUid} className="transition-colors hover:bg-muted/30">
+                                <td className="px-6 py-3 font-mono text-xs text-muted-foreground">{file.fileUid}</td>
+                                <td className="max-w-[160px] px-2 py-3 font-semibold text-foreground">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="truncate">{file.title}</span>
+                                    {!['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
+                                      <span className="relative flex h-1.5 w-1.5 shrink-0">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500"></span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-2 py-3 text-muted-foreground">{file.currentLocation}</td>
+                                <td className="px-6 py-3 text-right">
+                                  {file.isValidated ? (
+                                    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${file.isChainIntact ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400'}`}>
+                                      {file.isChainIntact ? <><Icons.Check className="h-3 w-3" /> Intact</> : <><Icons.AlertCircle className="h-3 w-3" /> Tampered</>}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs italic text-muted-foreground">Not checked</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Mobile: card list carrying the same data as the table above */}
+                      <div className="divide-y divide-border sm:hidden">
+                        {filesUnderAudit.map((file) => (
+                          <div key={file.fileUid} className="flex items-start justify-between gap-3 px-4 py-3.5">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
+                                {!['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
+                                  <span className="relative flex h-1.5 w-1.5 shrink-0">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500"></span>
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-1 truncate text-sm font-semibold text-foreground">{file.title}</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">{file.currentLocation}</p>
+                            </div>
+                            <div className="shrink-0 pt-0.5">
+                              {file.isValidated ? (
+                                <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${file.isChainIntact ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400'}`}>
+                                  {file.isChainIntact ? <><Icons.Check className="h-3 w-3" /> Intact</> : <><Icons.AlertCircle className="h-3 w-3" /> Tampered</>}
+                                </span>
+                              ) : (
+                                <span className="text-xs italic text-muted-foreground">Not checked</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   )}
                 </Card>
 
@@ -311,13 +345,13 @@ export default function AdminDashboard() {
                               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-bold text-foreground">{off.name?.[0]?.toUpperCase()}</span>
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-semibold text-foreground">{off.name}</p>
-                                <p className="truncate text-[11px] text-muted-foreground">{off.deskLocation}</p>
+                                <p className="truncate text-xs text-muted-foreground">{off.deskLocation}</p>
                               </div>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
-                              <span className="rounded-lg bg-muted px-2 py-1 text-[10px] font-semibold text-foreground">{stat?.processed || 0} routed</span>
+                              <span className="rounded-lg bg-muted px-2 py-1 text-xs font-semibold text-foreground">{stat?.processed || 0} routed</span>
                               {stat?.backtracked > 0 && (
-                                <span className="rounded-lg bg-red-500/10 px-2 py-1 text-[10px] font-semibold text-red-500">{stat.backtracked} bounces</span>
+                                <span className="rounded-lg bg-red-500/10 px-2 py-1 text-xs font-semibold text-red-500">{stat.backtracked} bounces</span>
                               )}
                             </div>
                           </div>
@@ -385,7 +419,7 @@ export default function AdminDashboard() {
                         <Icons.Building className="h-5 w-5" />
                       </span>
                       <div className="flex items-center gap-1">
-                        <Badge status={d.isActive ? 'Approved' : 'Rejected'} dot={false} className="!text-[9px] !px-2">
+                        <Badge status={d.isActive ? 'Approved' : 'Rejected'} dot={false} className="!text-xs !px-2">
                           {d.isActive ? 'Active' : 'Inactive'}
                         </Badge>
                         <button
@@ -404,11 +438,11 @@ export default function AdminDashboard() {
                     {d.description && <p className="mt-1.5 text-xs text-muted-foreground line-clamp-2">{d.description}</p>}
                     <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4">
                       <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Officers</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Officers</p>
                         <p className="mt-0.5 text-lg font-bold text-foreground">{d.officers}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Active files</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Active files</p>
                         <p className="mt-0.5 text-lg font-bold text-foreground">{d.files}</p>
                       </div>
                     </div>

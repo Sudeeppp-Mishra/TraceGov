@@ -13,7 +13,7 @@ export function Container({ children, className = '', size = 'default', ...props
 
 export function SectionLabel({ children, className = '' }) {
   return (
-    <span className={`inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary/80 ${className}`}>
+    <span className={`inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-primary/80 ${className}`}>
       <span className="h-1 w-1 rounded-full bg-emerald-500" />
       {children}
     </span>
@@ -191,20 +191,36 @@ export function Chip({ children, className = '', active = false, ...props }) {
 
 /* ───────────────────────── Stat card ───────────────────────── */
 
-export function StatCard({ label, value, icon, trend, tone = 'default', className = '' }) {
+// `delta` is optional: a number (e.g. 12 / -8) or a pre-formatted string (e.g. "+12%").
+// When provided, it renders as a small directional indicator next to `trend`.
+export function StatCard({ label, value, icon, trend, delta, tone = 'default', className = '' }) {
   const tones = {
     default: 'text-primary',
     emerald: 'text-emerald-600 dark:text-emerald-400',
     amber: 'text-amber-500',
     red: 'text-red-500',
   };
+  const hasDelta = delta !== undefined && delta !== null && delta !== '';
+  const isNegative = hasDelta && (typeof delta === 'number' ? delta < 0 : String(delta).trim().startsWith('-'));
+  const deltaLabel = hasDelta ? (typeof delta === 'number' ? `${delta > 0 ? '+' : ''}${delta}%` : delta) : null;
+
   return (
     <Card hover className={`p-5 ${className}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
           <p className="mt-2 text-3xl font-bold tracking-tight text-foreground tabular-nums">{value}</p>
-          {trend && <p className="mt-1.5 text-xs font-medium text-muted-foreground">{trend}</p>}
+          {(trend || hasDelta) && (
+            <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              {hasDelta && (
+                <span className={`inline-flex items-center gap-0.5 font-semibold ${isNegative ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                  <Icons.ArrowUpRight className={`h-3 w-3 ${isNegative ? 'rotate-90' : ''}`} />
+                  {deltaLabel}
+                </span>
+              )}
+              {trend && <span>{trend}</span>}
+            </p>
+          )}
         </div>
         {icon && (
           <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted ${tones[tone]}`}>
@@ -246,27 +262,87 @@ export function EmptyState({ icon, title, description, action, className = '' })
 
 /* ───────────────────────── Modal ───────────────────────── */
 
+// Focusable-selector used by the Modal's internal focus trap.
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+let modalIdSeq = 0;
+
 export function Modal({ isOpen, onClose, title, description, children, className = '' }) {
+  const dialogRef = useRef(null);
+  const previousFocusRef = useRef(null);
+  const idsRef = useRef(null);
+  if (!idsRef.current) {
+    modalIdSeq += 1;
+    idsRef.current = { title: `modal-title-${modalIdSeq}`, desc: `modal-desc-${modalIdSeq}` };
+  }
+
   useEffect(() => {
     if (!isOpen) return;
-    const onKey = (e) => e.key === 'Escape' && onClose?.();
-    document.addEventListener('keydown', onKey);
+
+    // Remember what had focus so it can be restored once the dialog closes.
+    previousFocusRef.current = document.activeElement;
     document.body.style.overflow = 'hidden';
+
+    const getFocusable = () =>
+      dialogRef.current
+        ? Array.from(dialogRef.current.querySelectorAll(FOCUSABLE_SELECTOR)).filter((el) => el.offsetParent !== null)
+        : [];
+
+    // Move focus into the dialog as soon as it opens.
+    const focusables = getFocusable();
+    (focusables[0] || dialogRef.current)?.focus();
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose?.();
+        return;
+      }
+      if (e.key === 'Tab') {
+        const items = getFocusable();
+        if (items.length === 0) {
+          e.preventDefault();
+          return;
+        }
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown, true);
     return () => {
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKeyDown, true);
       document.body.style.overflow = '';
+      // Restore focus to whatever triggered the dialog (e.g. the button that opened it).
+      previousFocusRef.current?.focus?.();
     };
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="absolute inset-0 bg-navy-950/50 backdrop-blur-sm animate-fade-in" onClick={onClose} />
-      <div className={`relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-zoom-in ${className}`}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-navy-950/50 backdrop-blur-sm animate-fade-in" onClick={onClose} aria-hidden="true" />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? idsRef.current.title : undefined}
+        aria-describedby={description ? idsRef.current.desc : undefined}
+        tabIndex={-1}
+        className={`relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-zoom-in outline-none ${className}`}
+      >
         <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
           <div>
-            <h3 className="text-base font-semibold text-foreground">{title}</h3>
-            {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+            <h3 id={idsRef.current.title} className="text-base font-semibold text-foreground">{title}</h3>
+            {description && <p id={idsRef.current.desc} className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
           </div>
           <button
             type="button"
@@ -301,7 +377,7 @@ export function TimelineItem({ title, meta, children, tone = 'primary', last = f
       <span className={`absolute left-0 top-1 h-3.5 w-3.5 rounded-full ${dot} ring-4 ring-card`} aria-hidden="true" />
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-0.5">
         <p className="text-sm font-semibold text-foreground">{title}</p>
-        {meta && <span className="text-[11px] font-medium text-muted-foreground">{meta}</span>}
+        {meta && <span className="text-xs font-medium text-muted-foreground">{meta}</span>}
       </div>
       {children && <div className="mt-1 text-xs text-muted-foreground">{children}</div>}
     </li>
@@ -461,7 +537,7 @@ export function BarChart({ data, height = 180, className = '' }) {
           return (
             <g key={idx} className="opacity-30 dark:opacity-20">
               <line x1={paddingX} y1={y} x2={totalWidth - 10} y2={y} stroke="var(--border-strong)" strokeWidth={1} strokeDasharray="3 3" />
-              <text x={paddingX - 8} y={y + 3} textAnchor="end" className="fill-muted-foreground text-[10px] font-mono font-medium">{val}</text>
+              <text x={paddingX - 8} y={y + 3} textAnchor="end" className="fill-muted-foreground text-xs font-mono font-medium">{val}</text>
             </g>
           );
         })}
@@ -491,12 +567,12 @@ export function BarChart({ data, height = 180, className = '' }) {
                 className="fill-primary/70 transition-all duration-300 group-hover:fill-emerald-500"
               />
               
-              {/* Text tooltip visible on hover */}
+              {/* Value label: always visible (touch-friendly), emphasized further on hover */}
               <text
                 x={x + barWidth / 2}
                 y={y - 6}
                 textAnchor="middle"
-                className="fill-foreground text-[10px] font-mono font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                className="fill-foreground text-xs font-mono font-bold opacity-60 transition-opacity duration-200 group-hover:opacity-100"
               >
                 {d.value}
               </text>
@@ -506,7 +582,7 @@ export function BarChart({ data, height = 180, className = '' }) {
                 x={x + barWidth / 2}
                 y={paddingY + chartHeight + 14}
                 textAnchor="middle"
-                className="fill-muted-foreground text-[10px] font-semibold"
+                className="fill-muted-foreground text-xs font-semibold"
               >
                 {d.label}
               </text>
@@ -557,7 +633,7 @@ export function DonutChart({ value, max = 100, size = 132, stroke = 13, label, t
       </svg>
       <div className="absolute text-center">
         <span className="block text-2xl font-bold tabular-nums text-foreground">{Math.round(pct * 100)}%</span>
-        {label && <span className="mt-0.5 block text-[10px] font-medium text-muted-foreground">{label}</span>}
+        {label && <span className="mt-0.5 block text-xs font-medium text-muted-foreground">{label}</span>}
       </div>
     </div>
   );
@@ -661,4 +737,3 @@ export function ActivityTicker({ items = [] }) {
     </div>
   );
 }
-

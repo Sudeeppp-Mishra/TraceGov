@@ -154,6 +154,9 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return request(`/ai/bottlenecks?${qs}`);
   },
+
+  // --- Public Platform Stats API ---
+  getPublicStats: () => request('/stats/public'),
 };
 
 // --- Session Cache Helpers ---

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Container, Button, Icons, Reveal, SectionLabel, useCountUp } from '../components/ui';
+import { Container, Button, Icons, Reveal, SectionLabel, Skeleton, useCountUp } from '../components/ui';
 import { Logo, ThemeToggle } from '../components/layout';
+import { api } from '../lib/api';
 
 /* ═══════════════════════════ Navbar ═══════════════════════════ */
 function LandingNav() {
@@ -9,7 +10,6 @@ function LandingNav() {
   const links = [
     { href: '#features', label: 'Features' },
     { href: '#how', label: 'How it works' },
-    { href: '#workflows', label: 'Workflows' },
     { href: '#faq', label: 'FAQ' },
   ];
   return (
@@ -49,8 +49,8 @@ function LandingNav() {
 /* ═══════════════════════════ Hero ═══════════════════════════ */
 function Hero() {
   return (
-    <section className="relative overflow-hidden pt-32 pb-20 sm:pt-40 sm:pb-28">
-      <div className="pointer-events-none absolute inset-0 bg-grid mask-fade-b opacity-60" aria-hidden="true" />
+    <section className="relative overflow-hidden pt-32 pb-20 sm:pt-40 sm:pb-24">
+      {/* Single soft glow — no grid/dot pattern, keeps dark mode clean */}
       <div className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[820px] -translate-x-1/2 rounded-full bg-emerald-500/10 blur-[120px]" aria-hidden="true" />
       <Container className="relative">
         <div className="mx-auto max-w-3xl text-center">
@@ -73,7 +73,7 @@ function Hero() {
           </Reveal>
           <Reveal delay={160}>
             <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-              TraceGov digitizes the movement of physical government files. Citizens follow their applications in real time, and officers process them on an immutable, tamper-proof audit ledger.
+              TraceGov digitizes the movement of physical government files. Citizens follow their applications in real time, on a tamper-proof audit ledger.
             </p>
           </Reveal>
           <Reveal delay={240}>
@@ -116,7 +116,7 @@ function HeroPreview() {
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Icons.FileText className="h-4.5 w-4.5" /></span>
             <div className="text-left">
               <p className="text-sm font-semibold text-foreground">Land Valuation Claim</p>
-              <p className="font-mono text-[11px] text-muted-foreground">TGTRACKA82 · Ward 01</p>
+              <p className="font-mono text-xs text-muted-foreground">TGTRACKA82 · Ward 01</p>
             </div>
           </div>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
@@ -127,19 +127,19 @@ function HeroPreview() {
           {steps.map((s, i) => (
             <div key={s.label} className="text-left">
               <div className="flex items-center gap-1">
-                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${s.done ? 'bg-emerald-500 text-white' : s.active ? 'bg-primary text-primary-foreground animate-pulse-ring' : 'bg-muted text-muted-foreground'}`}>
+                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${s.done ? 'bg-emerald-500 text-white' : s.active ? 'bg-primary text-primary-foreground animate-pulse-ring' : 'bg-muted text-muted-foreground'}`}>
                   {s.done ? '✓' : i + 1}
                 </span>
                 {i < steps.length - 1 && <span className={`h-0.5 flex-1 rounded ${s.done ? 'bg-emerald-500' : 'bg-border'}`} />}
               </div>
-              <p className="mt-2 text-[11px] font-semibold text-foreground">{s.label}</p>
+              <p className="mt-2 text-xs font-semibold text-foreground">{s.label}</p>
             </div>
           ))}
         </div>
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
           {[['Expected wait', '~42 min'], ['Current desk', 'Ward Chair'], ['Ledger', 'Verified']].map(([k, v]) => (
             <div key={k} className="rounded-lg border border-border bg-card p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{k}</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{k}</p>
               <p className="mt-1 text-sm font-bold text-foreground">{v}</p>
             </div>
           ))}
@@ -162,14 +162,54 @@ function StatItem({ value, suffix, label }) {
 }
 
 function Stats() {
+  // Live, platform-wide counts fetched from the public /api/stats/public
+  // endpoint — always reflects the current database state (no fabricated
+  // marketing numbers, no caching layer to go stale).
+  const [stats, setStats] = useState(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getPublicStats()
+      .then((res) => {
+        if (!cancelled) setStats(res.stats);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const items = stats
+    ? [
+        { value: stats.totalFiles, suffix: '', label: 'Files tracked' },
+        { value: stats.totalMovements, suffix: '', label: 'Movements logged' },
+        { value: stats.activeWards, suffix: '', label: 'Wards onboarded' },
+        { value: stats.resolutionRate, suffix: '%', label: 'Files resolved' },
+      ]
+    : [];
+
   return (
     <section className="border-y border-border bg-surface/50 py-14">
       <Container>
         <Reveal className="grid grid-cols-2 gap-8 lg:grid-cols-4">
-          <StatItem value={98.6} suffix="%" label="Files traced end-to-end" />
-          <StatItem value={42} suffix="k" label="Movements logged" />
-          <StatItem value={3.2} suffix="×" label="Faster status lookups" />
-          <StatItem value={100} suffix="%" label="Tamper-proof audit trail" />
+          {stats ? (
+            items.map((item) => <StatItem key={item.label} {...item} />)
+          ) : failed ? (
+            <div className="col-span-2 text-center text-sm text-muted-foreground lg:col-span-4">
+              Live platform statistics are temporarily unavailable.
+            </div>
+          ) : (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="text-center">
+                <Skeleton className="mx-auto h-9 w-20" />
+                <Skeleton className="mx-auto mt-2.5 h-4 w-28" />
+              </div>
+            ))
+          )}
         </Reveal>
       </Container>
     </section>
@@ -177,13 +217,13 @@ function Stats() {
 }
 
 /* ═══════════════════════════ Features ═══════════════════════════ */
+// Trimmed to the four highest-impact capabilities — one per audience
+// (registry, officer, citizen, administrator) — instead of six overlapping cards.
 const FEATURES = [
   { icon: Icons.QrCode, title: 'QR-tagged files', desc: 'Every physical folder gets a unique QR tag at registration. Scan to instantly pull its full ledger at any desk.' },
   { icon: Icons.ShieldCheck, title: 'Immutable audit ledger', desc: 'Each movement is chained with SHA-256 hashes. Updates and deletions are cryptographically blocked.' },
   { icon: Icons.Eye, title: 'Citizen transparency', desc: 'Applicants track progress live with a tracking ID — no account, no queues, no phone calls.' },
-  { icon: Icons.Sparkles, title: 'AI delay prediction', desc: 'M/M/1 queue modeling estimates wait times and surfaces bottleneck departments before they stall.' },
-  { icon: Icons.Route, title: 'Smart routing', desc: 'Forward, backtrack, and assign files between desks with reasons captured on the record.' },
-  { icon: Icons.BarChart, title: 'Operational analytics', desc: 'Dwell-time heatmaps and officer throughput give administrators a real-time view of the ward.' },
+  { icon: Icons.Sparkles, title: 'AI delay prediction', desc: 'Queue modeling estimates wait times and surfaces bottleneck departments before they stall.' },
 ];
 
 function Features() {
@@ -193,9 +233,9 @@ function Features() {
         <Reveal className="mx-auto max-w-2xl text-center">
           <SectionLabel>Platform</SectionLabel>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Everything a modern registry needs</h2>
-          <p className="mt-4 text-lg text-muted-foreground">Built for accountability first — transparent to citizens, rigorous for officers, insightful for administrators.</p>
+          <p className="mt-4 text-lg text-muted-foreground">Transparent to citizens, rigorous for officers, insightful for administrators.</p>
         </Reveal>
-        <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {FEATURES.map((f, i) => (
             <Reveal key={f.title} delay={i * 70}>
               <div className="group h-full rounded-2xl border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:border-border-strong hover:shadow-[0_18px_40px_-20px_rgba(15,31,54,0.25)]">
@@ -302,82 +342,11 @@ function WorkflowCard({ tone, eyebrow, title, icon: Icon, items, cta }) {
   );
 }
 
-/* ═══════════════════════════ Benefits ═══════════════════════════ */
-const BENEFITS = [
-  { icon: Icons.Eye, title: 'Transparency', desc: 'Citizens always know where their file is.' },
-  { icon: Icons.ShieldCheck, title: 'Accountability', desc: 'Every action is attributed and permanent.' },
-  { icon: Icons.Lock, title: 'Reduced corruption', desc: 'Tamper-proof records remove blind spots.' },
-  { icon: Icons.Zap, title: 'Better experience', desc: 'Less waiting, fewer queues, clearer outcomes.' },
-];
-
-function Benefits() {
-  return (
-    <section className="border-y border-border bg-surface/40 py-20">
-      <Container>
-        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-          {BENEFITS.map((b, i) => (
-            <Reveal key={b.title} delay={i * 80}>
-              <div className="flex items-start gap-4">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-card text-primary shadow-sm">
-                  <b.icon className="h-5.5 w-5.5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-foreground">{b.title}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">{b.desc}</p>
-                </div>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </Container>
-    </section>
-  );
-}
-
-/* ═══════════════════════════ Testimonials ═══════════════════════════ */
-const QUOTES = [
-  { quote: 'For the first time I could see my land file move between desks without visiting the office five times. It saved me two weeks.', name: 'Anita Sharma', role: 'Citizen, Ward 01' },
-  { quote: 'The audit ledger ended the "your file is somewhere in the building" problem. Accountability is now automatic.', name: 'Rajesh Thapa', role: 'Ward Officer' },
-  { quote: 'Bottleneck analytics let me reassign staff before queues built up. Processing times dropped noticeably.', name: 'Sunita Karki', role: 'Ward Administrator' },
-];
-
-function Testimonials() {
-  return (
-    <section className="py-24">
-      <Container>
-        <Reveal className="mx-auto max-w-2xl text-center">
-          <SectionLabel>Voices</SectionLabel>
-          <h2 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Trusted across the counter</h2>
-        </Reveal>
-        <div className="mt-14 grid gap-6 lg:grid-cols-3">
-          {QUOTES.map((q, i) => (
-            <Reveal key={q.name} delay={i * 90}>
-              <figure className="flex h-full flex-col rounded-2xl border border-border bg-card p-7">
-                <div className="flex gap-0.5 text-emerald-500">
-                  {Array.from({ length: 5 }).map((_, s) => <Icons.Star key={s} className="h-4 w-4 fill-current" />)}
-                </div>
-                <blockquote className="mt-4 flex-1 text-sm leading-relaxed text-foreground">“{q.quote}”</blockquote>
-                <figcaption className="mt-6 flex items-center gap-3 border-t border-border pt-5">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">{q.name[0]}</span>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">{q.name}</p>
-                    <p className="text-xs text-muted-foreground">{q.role}</p>
-                  </div>
-                </figcaption>
-              </figure>
-            </Reveal>
-          ))}
-        </div>
-      </Container>
-    </section>
-  );
-}
-
 /* ═══════════════════════════ FAQ ═══════════════════════════ */
+// Trimmed to the four questions people ask most before trying the product.
 const FAQS = [
   { q: 'Do citizens need an account to track a file?', a: 'No. Anyone with a tracking ID can view their file status instantly — no registration, login, or personal data required.' },
   { q: 'How is the audit trail tamper-proof?', a: 'Each movement record is chained to the previous one with a SHA-256 hash. Any edit or deletion breaks the chain and is immediately flagged during a ledger integrity audit.' },
-  { q: 'What happens if the AI service is offline?', a: 'Wait-time estimates gracefully fall back to locally computed averages, so the platform keeps working even without the prediction microservice.' },
   { q: 'Can files be routed backwards for corrections?', a: 'Yes. Officers can backtrack a file to any desk with a required reason, and the citizen sees a clear "returned for correction" notice.' },
   { q: 'Is TraceGov suitable for any government office?', a: 'It is designed for ward-level registries but the desk, department, and document-type model is fully configurable for other agencies.' },
 ];
@@ -423,15 +392,15 @@ function CtaBand() {
     <section className="py-24">
       <Container>
         <Reveal>
+          {/* Single glow accent — dot pattern removed to keep dark mode clean */}
           <div className="relative overflow-hidden rounded-3xl border border-navy-800 bg-navy-900 px-8 py-16 text-center shadow-2xl sm:px-16">
-            <div className="pointer-events-none absolute inset-0 bg-dots opacity-20" aria-hidden="true" />
             <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-emerald-500/20 blur-3xl" aria-hidden="true" />
             <div className="relative">
               <h2 className="mx-auto max-w-2xl text-3xl font-bold tracking-tight text-white sm:text-4xl">Bring transparency to your registry</h2>
               <p className="mx-auto mt-4 max-w-xl text-lg text-navy-100">Start tracking files today, or sign in to the officer terminal to process the queue.</p>
               <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
                 <Button as={Link} to="/track" variant="accent" size="lg" className="w-full sm:w-auto">Track a file <Icons.ArrowRight className="h-4 w-4" /></Button>
-                <Button as={Link} to="/login" size="lg" className="w-full bg-white text-navy-900 hover:bg-navy-50 sm:w-auto">Officer sign in</Button>
+                <Button as={Link} to="/login" size="lg" className="w-full !bg-white !text-navy-900 hover:!bg-navy-50 sm:w-auto">Officer sign in</Button>
               </div>
             </div>
           </div>
@@ -444,14 +413,13 @@ function CtaBand() {
 /* ═══════════════════════════ Footer ═══════════════════════════ */
 function Footer() {
   const cols = [
-    { title: 'Product', links: [['Features', '#features'], ['How it works', '#how'], ['Workflows', '#workflows'], ['FAQ', '#faq']] },
-    { title: 'Portals', links: [['Track a file', '/track'], ['Officer sign in', '/login'], ['Administration', '/login?role=admin']] },
-    { title: 'Resources', links: [['Documentation', '#'], ['API status', '#'], ['Accessibility', '#']] },
+    { title: 'Product', links: [['Features', '#features'], ['How it works', '#how'], ['FAQ', '#faq']] },
+    { title: 'Portals', links: [['Track a file', '/track'], ['Officer sign in', '/login']] },
   ];
   return (
     <footer className="border-t border-border bg-card">
       <Container className="py-16">
-        <div className="grid gap-10 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
+        <div className="grid gap-10 sm:grid-cols-[1.4fr_1fr_1fr]">
           <div>
             <Logo />
             <p className="mt-4 max-w-xs text-sm text-muted-foreground">Digital transparency and tamper-proof audit trails for public-service file movement.</p>
@@ -494,8 +462,6 @@ export default function LandingPage() {
       <Features />
       <HowItWorks />
       <Workflows />
-      <Benefits />
-      <Testimonials />
       <Faq />
       <CtaBand />
       <Footer />

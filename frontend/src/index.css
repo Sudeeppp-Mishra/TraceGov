@@ -55,9 +55,6 @@
   --color-emerald-500: #10b981;
   --color-emerald-600: #059669;
   --color-emerald-700: #047857;
-
-  /* Animation timing */
-  --animate-marquee: marquee 30s linear infinite;
 }
 
 :root {
@@ -141,40 +138,19 @@ h1, h2, h3, h4 {
   -webkit-backdrop-filter: blur(14px) saturate(160%);
 }
 
-/* ── Subtle grid / dotted backdrops for hero ── */
-.bg-grid {
-  background-image:
-    linear-gradient(to right, color-mix(in srgb, var(--border) 60%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--border) 60%, transparent) 1px, transparent 1px);
-  background-size: 44px 44px;
-}
-.bg-dots {
-  background-image: radial-gradient(color-mix(in srgb, var(--border-strong) 70%, transparent) 1px, transparent 1px);
-  background-size: 22px 22px;
-}
-.mask-fade-b { mask-image: linear-gradient(to bottom, black 55%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 100%); }
-.mask-fade-edges { mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent); }
-
 /* ── Animations ── */
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fade-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes fade-down { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes zoom-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
-@keyframes slide-in-left { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 @keyframes shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-4px); } 40%,80% { transform: translateX(4px); } }
-@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-emerald-500) 45%, transparent); } 70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
-@keyframes draw-line { from { height: 0; } to { height: 100%; } }
 
 .animate-fade-in { animation: fade-in 0.5s ease both; }
 .animate-fade-up { animation: fade-up 0.6s cubic-bezier(0.22,1,0.36,1) both; }
 .animate-fade-down { animation: fade-down 0.4s ease both; }
 .animate-zoom-in { animation: zoom-in 0.28s cubic-bezier(0.22,1,0.36,1) both; }
-.animate-slide-in-left { animation: slide-in-left 0.4s ease both; }
 .animate-shake { animation: shake 0.4s ease; }
-.animate-pulse-ring { animation: pulse-ring 2s ease-out infinite; }
-.animate-marquee { animation: marquee 30s linear infinite; }
 
 /* Reveal-on-scroll: hidden until .is-visible toggled by IntersectionObserver */
 .reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.7s cubic-bezier(0.22,1,0.36,1), transform 0.7s cubic-bezier(0.22,1,0.36,1); }

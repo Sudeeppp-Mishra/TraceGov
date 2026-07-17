@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { Container, Icons } from '../ui';
+import { NotificationBell } from '../NotificationBell';
 import { useTheme } from '../../lib/theme';
 import { clearSession } from '../../lib/api';
 
@@ -39,12 +40,12 @@ export function ThemeToggle({ className = '' }) {
 /* ───────────── Authenticated portal shell ───────────── */
 const OFFICER_NAV = [
   { to: '/officer', label: 'Workspace', icon: Icons.Layers },
-  { to: '/inbox', label: 'Inbox', icon: Icons.Bell },
+  { to: '/inbox', label: 'Inbox', icon: Icons.Inbox },
   { to: '/register-file', label: 'Register File', icon: Icons.FileText },
   { to: '/ai', label: 'AI Insights', icon: Icons.Sparkles },
 ];
 
-export function AppShell({ user, children, kicker }) {
+export function AppShell({ user, children }) {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -60,14 +61,7 @@ export function AppShell({ user, children, kicker }) {
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b border-border glass">
         <Container size="wide" className="flex h-16 items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Logo to="/officer" />
-            {kicker && (
-              <span className="hidden rounded-md bg-muted px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground md:inline-block">
-                {kicker}
-              </span>
-            )}
-          </div>
+          <Logo to="/officer" />
 
           <nav className="hidden items-center gap-1 md:flex">
             {nav.map(({ to, label, icon: Icon }) => (
@@ -76,7 +70,7 @@ export function AppShell({ user, children, kicker }) {
                 to={to}
                 end
                 className={({ isActive }) =>
-                  `inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors ${
+                  `inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                     isActive ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
                   }`
                 }
@@ -89,21 +83,16 @@ export function AppShell({ user, children, kicker }) {
 
           <div className="flex items-center gap-2">
             <ThemeToggle className="hidden sm:flex" />
+            <NotificationBell />
             {user && (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-card py-1 pl-1 pr-2 sm:gap-2.5 sm:pr-2.5">
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
                   {user.name?.[0]?.toUpperCase() || 'O'}
                 </span>
-                {/* Full identity — shown from sm upward */}
-                <div className="hidden leading-tight sm:block">
-                  <p className="text-xs font-semibold text-foreground">{user.name}</p>
-                  <p className="text-xs text-muted-foreground">Ward {user.wardCode} · {user.deskLocation}</p>
-                </div>
-                {/* Compact identity — mobile only, keeps the header from getting crowded */}
-                <div className="block leading-tight sm:hidden">
-                  <p className="max-w-[92px] truncate text-xs font-semibold text-foreground">{user.name}</p>
-                  <p className="max-w-[92px] truncate text-xs capitalize text-muted-foreground">
-                    {user.role}{user.wardCode ? ` · W${user.wardCode}` : ''}
+                <div className="leading-tight">
+                  <p className="max-w-[92px] truncate text-xs font-semibold text-foreground sm:max-w-none">{user.name}</p>
+                  <p className="max-w-[92px] truncate text-xs text-muted-foreground sm:max-w-none">
+                    Ward {user.wardCode} · {user.deskLocation}
                   </p>
                 </div>
               </div>
@@ -111,6 +100,7 @@ export function AppShell({ user, children, kicker }) {
             <button
               onClick={logout}
               className="hidden items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500 sm:inline-flex cursor-pointer"
+              aria-label="Sign out"
             >
               <Icons.LogOut className="h-4 w-4" />
             </button>

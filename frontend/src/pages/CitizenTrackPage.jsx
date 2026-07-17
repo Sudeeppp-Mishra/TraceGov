@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import {
@@ -7,7 +7,20 @@ import {
 } from '../components/ui';
 import { Logo, ThemeToggle } from '../components/layout';
 
-const STEPS = ['Received', 'Pending', 'Approved', 'Dispatched'];
+// The citizen-facing rail groups the nine backend statuses into four stages.
+const STEPS = ['Received', 'In processing', 'Decision', 'Dispatched'];
+const STEP_INDEX = {
+  Received: 0,
+  Pending: 1,
+  'Under Review': 1,
+  Backtracked: 1,
+  Returned: 1,
+  Approved: 2,
+  Verified: 2,
+  Rejected: 2,
+  Dispatched: 3,
+};
+const CORRECTION_STATUSES = ['Backtracked', 'Returned'];
 
 const STATUS_COPY = {
   Received: {
@@ -20,9 +33,19 @@ const STATUS_COPY = {
     summary: 'The responsible department is checking the submitted information and documents.',
     citizenAction: 'No action is required from you right now.',
   },
+  'Under Review': {
+    title: 'Your file is being reviewed.',
+    summary: 'The responsible department is checking the submitted information and documents.',
+    citizenAction: 'No action is required from you right now.',
+  },
   Approved: {
     title: 'Your file has been approved.',
     summary: 'The required review has been completed successfully.',
+    citizenAction: 'No action is required unless the office asks you to collect the document.',
+  },
+  Verified: {
+    title: 'Your file has been verified.',
+    summary: 'The required verification has been completed successfully.',
     citizenAction: 'No action is required unless the office asks you to collect the document.',
   },
   Dispatched: {
@@ -34,6 +57,16 @@ const STATUS_COPY = {
     title: 'Your file needs a correction.',
     summary: 'The office returned the file because something needs to be corrected before it can continue.',
     citizenAction: 'Please check the latest reason below and contact the current desk if anything is unclear.',
+  },
+  Returned: {
+    title: 'Your file needs a correction.',
+    summary: 'The office returned the file because something needs to be corrected before it can continue.',
+    citizenAction: 'Please check the latest reason below and contact the current desk if anything is unclear.',
+  },
+  Rejected: {
+    title: 'Your file was not approved.',
+    summary: 'The office reviewed the file and could not approve it in its current form.',
+    citizenAction: 'Please contact the office with your receipt for the reason and next options.',
   },
 };
 
@@ -65,147 +98,116 @@ function getLatestReason(timeline = []) {
 
 function getExpectedUpdate(fileDetails, aiEstimate) {
   if (fileDetails.currentStatus === 'Dispatched') return 'Completed';
-  if (fileDetails.currentStatus === 'Backtracked') return 'After the requested correction is resolved';
+  if (CORRECTION_STATUSES.includes(fileDetails.currentStatus)) return 'After the requested correction is resolved';
   if (aiEstimate?.estimatedMinutesRemaining) return `About ${aiEstimate.estimatedMinutesRemaining} minutes`;
-  return 'The next update will appear when the current desk moves the file';
+  return 'When the current desk moves the file';
 }
 
-function getNextStep(fileDetails) {
-  if (fileDetails.currentStatus === 'Dispatched') {
-    return {
-      title: 'Collect or archive the completed file',
-      description: 'The file journey is complete. If a physical document is required, visit the dispatch counter with your receipt.',
-      department: 'Dispatch Counter',
-    };
-  }
+function ProgressRail({ file }) {
+  const status = file.currentStatus;
+  const activeIndex = STEP_INDEX[status] ?? 0;
+  const needsCorrection = CORRECTION_STATUSES.includes(status);
+  const rejected = status === 'Rejected';
 
-  if (fileDetails.currentStatus === 'Backtracked') {
-    return {
-      title: 'Resolve the correction request',
-      description: 'After the correction is accepted, the file can continue through the approval path.',
-      department: fileDetails.currentLocation,
-    };
-  }
-
-  if (fileDetails.currentStatus === 'Approved') {
-    return {
-      title: 'Dispatch preparation',
-      description: 'The office will prepare the final output and mark the file ready for collection or dispatch.',
-      department: 'Dispatch Counter',
-    };
-  }
-
-  return {
-    title: 'Department review completion',
-    description: 'The current desk will either forward the file, approve it, or request a correction if something is missing.',
-    department: fileDetails.currentLocation,
-  };
-}
-
-function ProgressRail({ file, activeIndex }) {
   return (
-    <Card className="p-6">
-      <h3 className="mb-6 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Application progress</h3>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {STEPS.map((step, idx) => {
-          const backtracked = file.currentStatus === 'Backtracked';
-          const isDone = idx <= activeIndex && !backtracked;
-          const isActive = idx === activeIndex || (backtracked && step === 'Pending');
-          return (
-            <div key={step} className={`flex flex-col items-center rounded-xl border p-4 text-center transition-all ${
-              isDone ? 'border-emerald-500/30 bg-emerald-500/5' : isActive ? 'border-primary/30 bg-primary/5' : 'border-border bg-muted/20'
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      {STEPS.map((step, idx) => {
+        const isDone = idx < activeIndex || (idx === activeIndex && status === 'Dispatched');
+        const isActive = idx === activeIndex && status !== 'Dispatched';
+        const isProblem = isActive && (needsCorrection || rejected);
+        return (
+          <div key={step} className={`flex flex-col items-center rounded-xl border p-4 text-center transition-all ${
+            isProblem ? 'border-red-500/30 bg-red-500/5'
+              : isDone ? 'border-emerald-500/30 bg-emerald-500/5'
+              : isActive ? 'border-primary/30 bg-primary/5'
+              : 'border-border bg-muted/20'
+          }`}>
+            <div className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold ${
+              isProblem ? 'bg-red-500 text-white'
+                : isDone ? 'bg-emerald-500 text-white'
+                : isActive ? 'bg-primary text-primary-foreground'
+                : 'bg-muted text-muted-foreground'
             }`}>
-              <div className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold ${
-                isDone ? 'bg-emerald-500 text-white' : isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-              }`}>
-                {isDone ? <Icons.Check className="h-4 w-4" /> : idx + 1}
-              </div>
-              <p className="mt-2.5 text-xs font-semibold text-foreground">{step}</p>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                {isDone ? 'Completed' : isActive ? (file.currentStatus === 'Backtracked' ? 'Needs correction' : 'In progress') : 'Pending'}
-              </p>
+              {isDone ? <Icons.Check className="h-4 w-4" /> : isProblem ? <Icons.AlertCircle className="h-4 w-4" /> : idx + 1}
             </div>
-          );
-        })}
-      </div>
-    </Card>
+            <p className="mt-2.5 text-xs font-semibold text-foreground">{step}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {isProblem ? (rejected ? 'Not approved' : 'Needs correction') : isDone ? 'Completed' : isActive ? 'In progress' : 'Upcoming'}
+            </p>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
-function TransparencyAnswer({ fileDetails, aiEstimate }) {
+// Single answer card: status headline, progress rail, and the three facts a
+// citizen actually needs — where the file is, when to expect progress, and
+// whether they must do anything.
+function StatusCard({ fileDetails, aiEstimate, autoRefresh, onAutoRefreshChange }) {
   const statusCopy = getStatusCopy(fileDetails.currentStatus);
   const latestReason = getLatestReason(fileDetails.timeline);
-  const nextStep = getNextStep(fileDetails);
   const expectedUpdate = getExpectedUpdate(fileDetails, aiEstimate);
-  const needsAction = fileDetails.currentStatus === 'Backtracked';
+  const needsAction = CORRECTION_STATUSES.includes(fileDetails.currentStatus);
+  const isClosed = fileDetails.currentStatus === 'Dispatched';
 
   return (
     <Card className="overflow-hidden p-0">
       <div className="border-b border-border bg-muted/30 p-6 md:p-8">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="max-w-2xl">
-            <p className="text-xs font-semibold uppercase tracking-widest text-primary/80">Current answer</p>
-            <h2 className="mt-3 text-2xl font-bold tracking-tight text-foreground md:text-4xl">{statusCopy.title}</h2>
-            <p className="mt-4 text-base leading-7 text-muted-foreground">{statusCopy.summary}</p>
+            <p className="font-mono text-xs text-muted-foreground">{fileDetails.trackingId} · {fileDetails.documentType} · Ward {fileDetails.wardCode}</p>
+            <h2 className="mt-3 text-2xl font-bold tracking-tight text-foreground md:text-3xl">{statusCopy.title}</h2>
+            <p className="mt-3 text-base leading-7 text-muted-foreground">{statusCopy.summary}</p>
           </div>
           <Badge status={fileDetails.currentStatus} />
         </div>
       </div>
 
-      <div className="grid gap-0 md:grid-cols-3">
-        <InfoPanel
-          icon={Icons.Building}
-          label="Where is my file?"
-          title={fileDetails.currentLocation || 'Not recorded'}
-          description="This is the department currently responsible for the next update."
-        />
-        <InfoPanel
-          icon={Icons.Clock}
-          label="When should I expect progress?"
-          title={expectedUpdate}
-          description={aiEstimate?.confidence ? `Estimate confidence: ${aiEstimate.confidence}` : 'Based on the latest recorded movement.'}
-        />
-        <InfoPanel
-          icon={needsAction ? Icons.AlertCircle : Icons.CheckCircle}
-          label="Do I need to do anything?"
-          title={needsAction ? 'Yes, action is needed' : 'No action needed'}
-          description={statusCopy.citizenAction}
-          tone={needsAction ? 'danger' : 'success'}
-        />
-      </div>
+      <div className="p-6 md:p-8">
+        <ProgressRail file={fileDetails} />
 
-      <div className="border-t border-border p-6">
-        <div className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4">
-          <Icons.Route className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">What happens next</p>
-            <h3 className="mt-1 text-base font-semibold text-foreground">{nextStep.title}</h3>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">{nextStep.description}</p>
-            <p className="mt-3 text-xs font-semibold text-foreground">Responsible area: {nextStep.department}</p>
+        <dl className="mt-6 grid gap-4 sm:grid-cols-3">
+          <div className="rounded-xl border border-border bg-muted/20 p-4">
+            <dt className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <Icons.Building className="h-4 w-4" /> Current desk
+            </dt>
+            <dd className="mt-2 text-sm font-bold text-foreground">{fileDetails.currentLocation || 'Not recorded'}</dd>
           </div>
-        </div>
+          <div className="rounded-xl border border-border bg-muted/20 p-4">
+            <dt className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <Icons.Clock className="h-4 w-4" /> Next update
+            </dt>
+            <dd className="mt-2 text-sm font-bold text-foreground">{expectedUpdate}</dd>
+          </div>
+          <div className={`rounded-xl border p-4 ${needsAction ? 'border-red-500/20 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5'}`}>
+            <dt className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${needsAction ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
+              {needsAction ? <Icons.AlertCircle className="h-4 w-4" /> : <Icons.CheckCircle className="h-4 w-4" />} Your action
+            </dt>
+            <dd className="mt-2 text-sm font-medium text-foreground">{statusCopy.citizenAction}</dd>
+          </div>
+        </dl>
 
         {needsAction && latestReason && (
-          <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
+          <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-red-700 dark:text-red-300">Latest correction reason</p>
             <p className="mt-1 text-sm font-medium text-red-700/90 dark:text-red-300/90">{latestReason}</p>
           </div>
         )}
+
+        {!isClosed && (
+          <label className="mt-6 flex cursor-pointer select-none items-center gap-2 text-xs font-semibold text-foreground">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => onAutoRefreshChange(e.target.checked)}
+              className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/20 accent-primary"
+            />
+            Auto-refresh every 30 seconds and notify me of status changes
+          </label>
+        )}
       </div>
     </Card>
-  );
-}
-
-function InfoPanel({ icon: Icon, label, title, description, tone = 'default' }) {
-  const iconTone = tone === 'danger' ? 'text-red-500' : tone === 'success' ? 'text-emerald-500' : 'text-primary';
-
-  return (
-    <div className="border-border p-6 md:border-r md:last:border-r-0">
-      <Icon className={`h-5 w-5 ${iconTone}`} />
-      <p className="mt-4 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-      <h3 className="mt-1 text-base font-bold text-foreground">{title}</h3>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p>
-    </div>
   );
 }
 
@@ -293,33 +295,27 @@ export default function CitizenTrackPage() {
     lastStatusRef.current = fileDetails.currentStatus;
   }, [fileDetails]);
 
-  const requestNotificationPermission = () => {
-    if ('Notification' in window && Notification.permission === 'default') {
+  const onAutoRefreshChange = (checked) => {
+    setAutoRefresh(checked);
+    if (checked && 'Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
   };
-
-  const activeStepIndex = useMemo(() => {
-    if (!fileDetails) return -1;
-    if (fileDetails.currentStatus === 'Backtracked') return 1;
-    return Math.max(0, STEPS.indexOf(fileDetails.currentStatus));
-  }, [fileDetails]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       <PublicNav />
 
       <main className="pb-20">
-        <section className="relative overflow-hidden border-b border-border">
-          <div className="pointer-events-none absolute left-1/2 top-0 h-72 w-[640px] -translate-x-1/2 rounded-full bg-emerald-500/10 blur-[110px]" aria-hidden="true" />
-          <Container className="relative py-14 md:py-20">
+        <section className="border-b border-border">
+          <Container className="py-14 md:py-20">
             <div className="mx-auto max-w-2xl text-center">
               <SectionLabel>Citizen portal</SectionLabel>
               <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground sm:text-5xl">Track your government file</h1>
               <p className="mt-4 text-lg text-muted-foreground">Enter the tracking ID from your receipt to see where your file is, who has it, and what happens next.</p>
             </div>
 
-            <Card className="mx-auto mt-9 max-w-xl p-5 shadow-lg">
+            <Card className="mx-auto mt-9 max-w-xl shadow-lg">
               <form onSubmit={handleTrackSubmit} className="flex flex-col gap-3 sm:flex-row">
                 <Input id="trackingId" placeholder="e.g. TGTRACKA82" value={trackingId}
                   onChange={(e) => setTrackingId(e.target.value)} mono required disabled={loading}
@@ -335,11 +331,8 @@ export default function CitizenTrackPage() {
         <Container className="mt-10 max-w-5xl">
           {loading && (
             <div className="space-y-6">
-              <Skeleton className="h-56 w-full" />
-              <div className="grid gap-6 md:grid-cols-2">
-                <Skeleton className="h-56" />
-                <Skeleton className="h-56" />
-              </div>
+              <Skeleton className="h-96 w-full" />
+              <Skeleton className="h-56" />
             </div>
           )}
 
@@ -355,8 +348,8 @@ export default function CitizenTrackPage() {
           {!loading && !error && !searched && (
             <div className="space-y-6 animate-fade-up">
               {previousSearches.length > 0 && (
-                <Card className="p-5">
-                  <h4 className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Recent searches</h4>
+                <Card>
+                  <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recent searches</h4>
                   <div className="flex flex-wrap gap-2">
                     {previousSearches.map((s) => (
                       <button
@@ -392,85 +385,42 @@ export default function CitizenTrackPage() {
 
           {!loading && fileDetails && (
             <div className="space-y-6 animate-fade-up">
-              <TransparencyAnswer fileDetails={fileDetails} aiEstimate={aiEstimate} />
+              <StatusCard
+                fileDetails={fileDetails}
+                aiEstimate={aiEstimate}
+                autoRefresh={autoRefresh}
+                onAutoRefreshChange={onAutoRefreshChange}
+              />
 
-              <ProgressRail file={fileDetails} activeIndex={activeStepIndex} />
-
-              {fileDetails.currentStatus !== 'Dispatched' && (
-                <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-4 text-xs font-semibold">
-                  <label className="flex items-center gap-2 text-foreground cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={autoRefresh}
-                      onChange={(e) => {
-                        setAutoRefresh(e.target.checked);
-                        if (e.target.checked) requestNotificationPermission();
-                      }}
-                      className="h-4 w-4 rounded border-border bg-muted text-primary focus:ring-primary/20 accent-primary"
-                    />
-                    Auto-refresh status every 30 seconds
-                  </label>
-                  {autoRefresh && (
-                    <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-ping" />
-                      Live monitoring active
-                    </span>
-                  )}
-                </div>
-              )}
-
-              <div className="grid items-start gap-6 md:grid-cols-[0.8fr_1.2fr]">
-                <Card className="p-6">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-mono text-[11px] text-muted-foreground">{fileDetails.trackingId}</p>
-                      <h2 className="mt-1.5 text-lg font-bold leading-snug text-foreground">{fileDetails.title}</h2>
-                      <p className="mt-1 text-xs text-muted-foreground">{fileDetails.documentType} · Ward {fileDetails.wardCode}</p>
-                    </div>
-                    <Icons.FileText className="h-5 w-5 text-primary" />
-                  </div>
-                  <hr className="my-5 border-border" />
-                  <dl className="space-y-4">
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Registered</dt>
-                      <dd className="mt-1 text-sm font-semibold text-foreground">
-                        {new Date(fileDetails.registeredAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Last updated</dt>
-                      <dd className="mt-1 text-sm font-semibold text-foreground">
-                        {new Date(fileDetails.lastUpdated).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </dd>
-                    </div>
-                  </dl>
-                </Card>
-
-                <Card className="p-6">
-                  <div className="mb-5 flex items-center gap-2">
+              <Card>
+                <div className="mb-5 flex flex-wrap items-baseline justify-between gap-2">
+                  <div className="flex items-center gap-2">
                     <Icons.Layers className="h-4.5 w-4.5 text-muted-foreground" />
-                    <h4 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Movement history</h4>
+                    <h4 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Movement history — {fileDetails.title}</h4>
                   </div>
-                  {fileDetails.timeline?.length > 0 ? (
-                    <Timeline>
-                      {fileDetails.timeline.map((item, idx) => (
-                        <TimelineItem
-                          key={`${item.timestamp}-${idx}`}
-                          title={item.status}
-                          meta={new Date(item.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          tone={item.status === 'Backtracked' ? 'red' : item.status === 'Approved' || item.status === 'Dispatched' ? 'emerald' : 'primary'}
-                          last={idx === fileDetails.timeline.length - 1}
-                        >
-                          <p className="text-[11px] font-medium text-foreground/70">{item.location}</p>
-                          {item.message && <p className="mt-1.5 rounded-lg border border-border/50 bg-muted/40 p-2.5">{item.message}</p>}
-                        </TimelineItem>
-                      ))}
-                    </Timeline>
-                  ) : (
-                    <p className="py-8 text-center text-xs italic text-muted-foreground">No movement recorded yet.</p>
-                  )}
-                </Card>
-              </div>
+                  <p className="text-xs text-muted-foreground">
+                    Registered {new Date(fileDetails.registeredAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {' · '}Updated {new Date(fileDetails.lastUpdated).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </p>
+                </div>
+                {fileDetails.timeline?.length > 0 ? (
+                  <Timeline>
+                    {fileDetails.timeline.map((item, idx) => (
+                      <TimelineItem
+                        key={`${item.timestamp}-${idx}`}
+                        title={item.status}
+                        meta={new Date(item.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        tone={CORRECTION_STATUSES.includes(item.status) || item.status === 'Rejected' ? 'red' : ['Approved', 'Verified', 'Dispatched'].includes(item.status) ? 'emerald' : 'primary'}
+                      >
+                        <p className="text-xs font-medium text-foreground/70">{item.location}</p>
+                        {item.message && <p className="mt-1.5 rounded-lg border border-border/50 bg-muted/40 p-2.5">{item.message}</p>}
+                      </TimelineItem>
+                    ))}
+                  </Timeline>
+                ) : (
+                  <p className="py-8 text-center text-xs italic text-muted-foreground">No movement recorded yet.</p>
+                )}
+              </Card>
             </div>
           )}
         </Container>

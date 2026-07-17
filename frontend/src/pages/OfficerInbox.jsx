@@ -2,14 +2,17 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, getStoredUser } from '../lib/api';
 import {
-  Container, Card, Button, Badge, Icons, Skeleton, EmptyState, Chip, Tabs,
+  Container, Card, Badge, Icons, Skeleton, EmptyState, Chip, Tabs,
 } from '../components/ui';
 import { AppShell, PageHeading } from '../components/layout';
+import { usePolling } from '../lib/hooks';
+import { dwellLabel } from '../lib/time';
 
 export default function OfficerInbox() {
   const navigate = useNavigate();
   const [currentUser, setCurrentUser] = useState(null);
-  const [recentFiles, setRecentFiles] = useState([]);
+  const [deskFiles, setDeskFiles] = useState([]);
+  const [wardFiles, setWardFiles] = useState([]);
   const [departmentQueue, setDepartmentQueue] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('desk');
@@ -18,44 +21,51 @@ export default function OfficerInbox() {
     const user = getStoredUser();
     if (!user) { navigate('/login'); return; }
     setCurrentUser(user);
-    load(user.wardCode);
   }, [navigate]);
 
-  const load = async (wardCode) => {
-    setLoading(true);
+  const load = async () => {
+    const user = getStoredUser();
+    if (!user) return;
     try {
-      const [summary, inboxData] = await Promise.all([
-        api.dashboardSummary({ wardCode }),
+      const [summary, deskData, wardData] = await Promise.all([
+        api.dashboardSummary({ wardCode: user.wardCode }),
+        api.getOfficerInbox({ scope: 'desk' }),
         api.getOfficerInbox(),
       ]);
-      setRecentFiles(inboxData.files || []);
+      setDeskFiles(deskData.files || []);
+      setWardFiles(wardData.files || []);
       setDepartmentQueue(summary.departmentQueue || []);
     } catch { /* handled by empty state */ } finally {
       setLoading(false);
     }
   };
 
+  usePolling(load, 60000, { enabled: !!currentUser });
+
   const deskLocation = currentUser?.deskLocation;
-  const atMyDesk = useMemo(() => recentFiles.filter((f) => f.currentLocation === deskLocation), [recentFiles, deskLocation]);
-  const needsAttention = useMemo(() => recentFiles.filter((f) => f.currentStatus === 'Backtracked' || f.currentStatus === 'Pending'), [recentFiles]);
-  const list = tab === 'desk' ? atMyDesk : tab === 'attention' ? needsAttention : recentFiles;
+  // Longest-waiting first — that is the order work should be picked up in.
+  const byOldest = (a, b) => new Date(a.updatedAt) - new Date(b.updatedAt);
+  const atMyDesk = useMemo(() => [...deskFiles].sort(byOldest), [deskFiles]);
+  const needsAttention = useMemo(
+    () => wardFiles.filter((f) => f.currentStatus === 'Backtracked' || f.currentStatus === 'Pending').sort(byOldest),
+    [wardFiles]
+  );
+  const list = tab === 'desk' ? atMyDesk : needsAttention;
 
   const openFile = (fileUid) => navigate(`/officer?file=${encodeURIComponent(fileUid)}`);
 
   const TABS = [
     { id: 'desk', label: `My desk (${atMyDesk.length})`, icon: Icons.Folder },
     { id: 'attention', label: `Needs attention (${needsAttention.length})`, icon: Icons.AlertCircle },
-    { id: 'all', label: `All ward (${recentFiles.length})`, icon: Icons.Layers },
   ];
 
   return (
-    <AppShell user={currentUser} kicker={currentUser ? `Ward ${currentUser.wardCode}` : ''}>
+    <AppShell user={currentUser}>
       <Container size="wide" className="space-y-6 pt-8">
         <PageHeading
           breadcrumbs={['Workspace', 'Inbox']}
           title="Inbox"
-          description={deskLocation ? `Files awaiting action at the ${deskLocation}.` : 'Files awaiting action across your ward.'}
-          actions={<Button variant="outline" onClick={() => load(currentUser.wardCode)}><Icons.Zap className="h-4 w-4" /> Refresh</Button>}
+          description={deskLocation ? `Files awaiting action at the ${deskLocation}, longest-waiting first. Refreshes automatically.` : 'Files awaiting action across your ward.'}
         />
 
         <div className="grid items-start gap-6 lg:grid-cols-[1fr_18rem]">
@@ -67,7 +77,7 @@ export default function OfficerInbox() {
             ) : list.length === 0 ? (
               <EmptyState
                 icon={<Icons.CheckCircle className="h-6 w-6" />}
-                title={tab === 'desk' ? 'Your desk is clear' : tab === 'attention' ? 'Nothing needs attention' : 'No files in the ward'}
+                title={tab === 'desk' ? 'Your desk is clear' : 'Nothing needs attention'}
                 description={tab === 'desk' ? 'No files are currently waiting at your desk.' : 'Files will appear here as they move through the ward.'}
               />
             ) : (
@@ -86,32 +96,22 @@ export default function OfficerInbox() {
                         <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
                         <Badge status={file.currentStatus} />
                       </div>
-                      <p className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                        <span className="truncate">{file.title}</span>
-                        {file.currentStatus === 'Backtracked' ? (
-                          // Animated pulse reserved for files that genuinely need attention now.
-                          <span className="relative flex h-2 w-2 shrink-0">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                          </span>
-                        ) : (
-                          !['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
-                            // Calmer, static indicator for other in-progress files — avoids a whole
-                            // list of rows pulsing at once.
-                            <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-sky-500" aria-hidden="true" />
-                          )
-                        )}
-                      </p>
+                      <p className="mt-0.5 truncate text-sm font-semibold text-foreground">{file.title}</p>
                       <p className="truncate text-xs text-muted-foreground">{file.citizenName} · {file.currentLocation}</p>
                     </div>
-                    <Icons.ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span className="text-xs font-medium tabular-nums text-muted-foreground" title="Time since last movement">
+                        {dwellLabel(file.updatedAt)}
+                      </span>
+                      <Icons.ChevronRight className="h-5 w-5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                    </div>
                   </button>
                 ))}
               </div>
             )}
           </div>
 
-          <Card className="p-6">
+          <Card>
             <h3 className="mb-4 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Ward queues</h3>
             {loading ? (
               <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-6" />)}</div>
@@ -121,7 +121,7 @@ export default function OfficerInbox() {
                   <div key={dept._id} className="flex items-center justify-between text-xs">
                     <span className={`font-semibold ${dept._id === deskLocation ? 'text-primary' : 'text-foreground'}`}>{dept._id}</span>
                     <div className="flex items-center gap-2">
-                      {dept.pending > 0 && <Chip className="!px-1.5 !py-0.5">{dept.pending} delayed</Chip>}
+                      {dept.pending > 0 && <Chip>{dept.pending} delayed</Chip>}
                       <span className="rounded bg-muted px-2 py-0.5 text-xs font-bold text-foreground">{dept.count}</span>
                     </div>
                   </div>

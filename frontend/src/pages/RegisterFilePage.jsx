@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, getStoredUser } from '../lib/api';
-import { Container, Card, Button, Input, Select, Textarea, Icons, useToast } from '../components/ui';
-import { AppShell } from '../components/layout';
+import { Container, Card, Button, Input, Select, Textarea, Icons, useToast, Alert } from '../components/ui';
+import { AppShell, PageHeading } from '../components/layout';
 
 const DOCUMENT_TYPES = [
   'Recommendation Letter', 'Tax Clearance Receipt', 'Birth Certificate Registration',
@@ -79,7 +79,7 @@ export default function RegisterFilePage() {
   const file = receipt?.file;
 
   return (
-    <AppShell user={currentUser} kicker="Register">
+    <AppShell user={currentUser}>
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
           body { background:#fff !important; color:#000 !important; }
@@ -89,19 +89,16 @@ export default function RegisterFilePage() {
       `}} />
       <Container className="max-w-2xl pt-8">
         {!receipt ? (
-          <div className="animate-fade-up">
-            <div className="mb-8">
-              <h1 className="text-2xl font-bold tracking-tight text-foreground">Register a physical file</h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">Enter citizen details and required documents to generate a trackable QR record.</p>
-            </div>
+          <div className="animate-fade-up space-y-6">
+            <PageHeading
+              breadcrumbs={['Workspace', 'Register file']}
+              title="Register a physical file"
+              description="Enter citizen details and required documents to generate a trackable QR record."
+            />
 
-            {error && (
-              <div className="mb-6 flex items-start gap-2.5 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm font-medium text-red-600 dark:text-red-400" role="alert">
-                <Icons.AlertCircle className="mt-0.5 h-4.5 w-4.5 shrink-0" /> {error}
-              </div>
-            )}
+            {error && <Alert tone="error">{error}</Alert>}
 
-            <Card className="p-6 md:p-8">
+            <Card>
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Input label="Citizen full name" id="name" placeholder="e.g. Aarav Sharma" value={citizenName} onChange={(e) => setCitizenName(e.target.value)} required disabled={loading} />
@@ -125,7 +122,7 @@ export default function RegisterFilePage() {
                   <div className="mb-4 flex flex-wrap gap-1.5">
                     {DOCUMENT_TEMPLATES.map((tmpl) => (
                       <button key={tmpl} type="button" onClick={() => addChecklistItem(tmpl)}
-                        className="rounded-lg border border-border bg-muted/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground cursor-pointer">
+                        className="rounded-lg border border-border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground cursor-pointer">
                         + {tmpl}
                       </button>
                     ))}
@@ -166,23 +163,23 @@ export default function RegisterFilePage() {
               <p className="mt-1.5 text-sm text-muted-foreground">Print the tag below and attach it to the physical folder.</p>
             </div>
 
-            <Card className="print-ticket mx-auto max-w-md border-2 border-primary/20 p-6">
-              <p className="text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">TraceGov File Tracking Ticket</p>
+            <Card className="print-ticket mx-auto max-w-md border-2 border-primary/20">
+              <p className="text-center text-xs font-bold uppercase tracking-wider text-muted-foreground">TraceGov File Tracking Ticket</p>
               <div className="mx-auto my-5 flex h-48 w-48 items-center justify-center rounded-xl border border-border bg-white p-2.5">
                 {file?.qrDataUrl ? (
                   <img src={file.qrDataUrl} alt="File QR tag" className="h-full w-full object-contain" />
                 ) : (
-                  <p className="text-[10px] uppercase text-red-500">QR unavailable</p>
+                  <p className="text-xs uppercase text-red-500">QR unavailable</p>
                 )}
               </div>
               <h3 className="text-center text-lg font-bold leading-snug text-foreground">{file?.title}</h3>
               <div className="mt-6 grid grid-cols-2 gap-4 rounded-xl border border-border bg-muted/40 p-4 text-left text-xs">
-                <div><span className="block text-[9px] font-bold uppercase text-muted-foreground">File UID</span><span className="mt-0.5 font-mono font-bold text-foreground">{file?.fileUid}</span></div>
-                <div><span className="block text-[9px] font-bold uppercase text-muted-foreground">Tracking ID</span><span className="mt-0.5 font-mono font-bold text-foreground">{file?.trackingId}</span></div>
-                <div><span className="block text-[9px] font-bold uppercase text-muted-foreground">Citizen</span><span className="mt-0.5 font-bold text-foreground">{citizenName}</span></div>
-                <div><span className="block text-[9px] font-bold uppercase text-muted-foreground">Initial desk</span><span className="mt-0.5 font-bold text-foreground">{file?.currentLocation}</span></div>
+                <div><span className="block text-xs font-bold uppercase text-muted-foreground">File UID</span><span className="mt-0.5 font-mono font-bold text-foreground">{file?.fileUid}</span></div>
+                <div><span className="block text-xs font-bold uppercase text-muted-foreground">Tracking ID</span><span className="mt-0.5 font-mono font-bold text-foreground">{file?.trackingId}</span></div>
+                <div><span className="block text-xs font-bold uppercase text-muted-foreground">Citizen</span><span className="mt-0.5 font-bold text-foreground">{citizenName}</span></div>
+                <div><span className="block text-xs font-bold uppercase text-muted-foreground">Initial desk</span><span className="mt-0.5 font-bold text-foreground">{file?.currentLocation}</span></div>
               </div>
-              <p className="mt-6 text-center text-[9px] italic leading-relaxed text-muted-foreground">
+              <p className="mt-6 text-center text-xs italic leading-relaxed text-muted-foreground">
                 Track status anytime by scanning this QR or visiting<br /><strong>{window.location.origin}/track</strong>
               </p>
             </Card>

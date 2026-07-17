@@ -1,7 +1,6 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
 /**
- * Returns JWT token from localStorage.
  * Returns JWT token from sessionStorage.
  */
 function getToken() {
@@ -94,7 +93,10 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  getOfficerInbox: () => request('/files/inbox'),
+  getOfficerInbox: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/files/inbox${qs ? `?${qs}` : ''}`);
+  },
 
   // --- Departments API ---
   getDepartments: () => request('/departments'),
@@ -111,7 +113,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  deleteDepartment: (id) =>
+  // Despite the DELETE verb, the backend toggles the department's active flag.
+  toggleDepartment: (id) =>
     request(`/departments/${id}`, {
       method: 'DELETE',
     }),
@@ -126,12 +129,6 @@ export const api = {
       body: JSON.stringify({ trackingId }),
     }),
 
-  analyzeDocument: (payload) =>
-    request('/ai/analyze-document', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
   predictDelay: (payload) =>
     request('/ai/predict-delay', {
       method: 'POST',
@@ -144,12 +141,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  citizenMessage: (payload) =>
-    request('/ai/citizen-message', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
   getBottlenecks: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/ai/bottlenecks?${qs}`);
@@ -157,6 +148,11 @@ export const api = {
 
   // --- Public Platform Stats API ---
   getPublicStats: () => request('/stats/public'),
+
+  getWeeklyThroughput: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/stats/weekly${qs ? `?${qs}` : ''}`);
+  },
 };
 
 // --- Session Cache Helpers ---

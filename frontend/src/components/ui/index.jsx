@@ -1,5 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+/*
+ * Design standard (applies to every page):
+ * - Labels/overlines: text-xs only (no text-[9px]/[10px]/[11px] arbitrary sizes).
+ * - Body copy: text-sm. Page titles come from layout/PageHeading.
+ * - Card padding: default p-6. Exceptions: p-0 for full-bleed tables/lists
+ *   (rows carry px-6 py-4), p-4 for compact list-item cards.
+ * - Section rhythm: space-y-8 at page level, gap-4 within sections.
+ * - Pills: Badge for anything status-like, Chip for neutral metadata.
+ *   Never hand-roll rounded-full border spans.
+ */
+
 /* ───────────────────────── Layout ───────────────────────── */
 
 export function Container({ children, className = '', size = 'default', ...props }) {
@@ -125,7 +136,7 @@ export function Textarea({ label, id, className = '', error, rows = 3, ...props 
   );
 }
 
-export function Select({ label, id, children, className = '', error, ...props }) {
+export function Select({ label, id, children, className = '', error, hint, ...props }) {
   return (
     <div className="w-full">
       {label && <label htmlFor={id} className="mb-1.5 block text-xs font-semibold text-foreground">{label}</label>}
@@ -143,7 +154,11 @@ export function Select({ label, id, children, className = '', error, ...props })
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </div>
-      {error && <p className="mt-1.5 text-xs font-medium text-red-500">{error}</p>}
+      {error ? (
+        <p className="mt-1.5 text-xs font-medium text-red-500">{error}</p>
+      ) : hint ? (
+        <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>
+      ) : null}
     </div>
   );
 }
@@ -161,29 +176,32 @@ export const STATUS_STYLES = {
   Backtracked: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900/50',
   Returned:    'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900/50',
   Rejected:    'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900/50',
-  Success:     'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/50',
+  Active:      'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900/50',
+  Inactive:    'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/50 dark:text-slate-300 dark:border-slate-700',
 };
 
 const STATUS_DOT = {
   Received: 'bg-navy-500', Pending: 'bg-amber-500', 'Under Review': 'bg-blue-500',
   Approved: 'bg-emerald-500', Verified: 'bg-emerald-500', Dispatched: 'bg-slate-500',
-  Backtracked: 'bg-red-500', Returned: 'bg-red-500', Rejected: 'bg-red-500', Success: 'bg-emerald-500',
+  Backtracked: 'bg-red-500', Returned: 'bg-red-500', Rejected: 'bg-red-500',
+  Active: 'bg-emerald-500', Inactive: 'bg-slate-400',
 };
 
+// `status` drives the color recipe; `children` optionally overrides the label text.
 export function Badge({ status, children, dot = true, className = '' }) {
-  const label = status || children;
-  const style = STATUS_STYLES[label] || 'bg-muted text-muted-foreground border-border';
+  const label = children || status;
+  const style = STATUS_STYLES[status] || 'bg-muted text-muted-foreground border-border';
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${style} ${className}`}>
-      {dot && status && <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[label] || 'bg-current'}`} />}
+      {dot && status && <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status] || 'bg-current'}`} />}
       {label}
     </span>
   );
 }
 
-export function Chip({ children, className = '', active = false, ...props }) {
+export function Chip({ children, className = '', ...props }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium ${active ? 'border-primary/30 bg-primary/5 text-foreground' : 'border-border bg-muted/40 text-muted-foreground'} ${className}`} {...props}>
+    <span className={`inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground ${className}`} {...props}>
       {children}
     </span>
   );
@@ -191,36 +209,21 @@ export function Chip({ children, className = '', active = false, ...props }) {
 
 /* ───────────────────────── Stat card ───────────────────────── */
 
-// `delta` is optional: a number (e.g. 12 / -8) or a pre-formatted string (e.g. "+12%").
-// When provided, it renders as a small directional indicator next to `trend`.
-export function StatCard({ label, value, icon, trend, delta, tone = 'default', className = '' }) {
+export function StatCard({ label, value, icon, trend, tone = 'default', className = '' }) {
   const tones = {
     default: 'text-primary',
     emerald: 'text-emerald-600 dark:text-emerald-400',
     amber: 'text-amber-500',
     red: 'text-red-500',
   };
-  const hasDelta = delta !== undefined && delta !== null && delta !== '';
-  const isNegative = hasDelta && (typeof delta === 'number' ? delta < 0 : String(delta).trim().startsWith('-'));
-  const deltaLabel = hasDelta ? (typeof delta === 'number' ? `${delta > 0 ? '+' : ''}${delta}%` : delta) : null;
 
   return (
-    <Card hover className={`p-5 ${className}`}>
+    <Card hover className={className}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
           <p className="mt-2 text-3xl font-bold tracking-tight text-foreground tabular-nums">{value}</p>
-          {(trend || hasDelta) && (
-            <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              {hasDelta && (
-                <span className={`inline-flex items-center gap-0.5 font-semibold ${isNegative ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                  <Icons.ArrowUpRight className={`h-3 w-3 ${isNegative ? 'rotate-90' : ''}`} />
-                  {deltaLabel}
-                </span>
-              )}
-              {trend && <span>{trend}</span>}
-            </p>
-          )}
+          {trend && <p className="mt-1.5 text-xs font-medium text-muted-foreground">{trend}</p>}
         </div>
         {icon && (
           <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted ${tones[tone]}`}>
@@ -256,6 +259,86 @@ export function EmptyState({ icon, title, description, action, className = '' })
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       {description && <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{description}</p>}
       {action && <div className="mt-5">{action}</div>}
+    </div>
+  );
+}
+
+/* ───────────────────────── Alert ───────────────────────── */
+
+export function Alert({ tone = 'error', title, children, className = '' }) {
+  const config = {
+    error:   { style: STATUS_STYLES.Rejected, icon: Icons.AlertCircle },
+    warning: { style: STATUS_STYLES.Pending, icon: Icons.AlertCircle },
+    success: { style: STATUS_STYLES.Approved, icon: Icons.CheckCircle },
+    info:    { style: STATUS_STYLES.Received, icon: Icons.Info },
+  }[tone] || {};
+  const Icon = config.icon || Icons.Info;
+  return (
+    <div
+      role={tone === 'error' || tone === 'warning' ? 'alert' : undefined}
+      className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm ${config.style} ${className}`}
+    >
+      <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+      <div className="min-w-0">
+        {title && <p className="font-semibold">{title}</p>}
+        {children && <div className={title ? 'mt-0.5' : ''}>{children}</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────── Popover ───────────────────────── */
+
+// Lightweight anchored panel. `trigger` is a render prop receiving props to
+// spread on the trigger button; the panel closes on outside click / Escape.
+export function Popover({ trigger, children, align = 'end', open, onOpenChange, className = '' }) {
+  const rootRef = useRef(null);
+  const triggerRef = useRef(null);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = open !== undefined ? open : internalOpen;
+  const setOpen = (next) => {
+    if (open === undefined) setInternalOpen(next);
+    onOpenChange?.(next);
+  };
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus?.();
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      {trigger({
+        ref: triggerRef,
+        onClick: () => setOpen(!isOpen),
+        'aria-expanded': isOpen,
+        'aria-haspopup': 'dialog',
+      })}
+      {isOpen && (
+        <div
+          role="dialog"
+          className={`absolute top-full z-50 mt-2 overflow-hidden rounded-2xl border border-border bg-card shadow-xl animate-fade-down ${
+            align === 'end' ? 'right-0' : 'left-0'
+          } ${className}`}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -363,8 +446,19 @@ export function Modal({ isOpen, onClose, title, description, children, className
 
 /* ───────────────────────── Timeline ───────────────────────── */
 
+// Automatically marks the final child as `last` so callers don't have to
+// compute `idx === arr.length - 1` themselves.
 export function Timeline({ children, className = '' }) {
-  return <ol className={`relative space-y-6 ${className}`}>{children}</ol>;
+  const items = React.Children.toArray(children);
+  return (
+    <ol className={`relative space-y-6 ${className}`}>
+      {items.map((child, idx) =>
+        React.isValidElement(child) && child.props.last === undefined
+          ? React.cloneElement(child, { last: idx === items.length - 1 })
+          : child
+      )}
+    </ol>
+  );
 }
 
 export function TimelineItem({ title, meta, children, tone = 'primary', last = false }) {
@@ -668,6 +762,7 @@ export const Icons = {
   Sparkles: mk(<path d="M12 3l1.8 4.9L18.7 9.7l-4.9 1.8L12 16.4l-1.8-4.9L5.3 9.7l4.9-1.8L12 3zM19 14l.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9.9-2.4z" />),
   Layers: mk(<path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5" />),
   Bell: mk(<path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 004 0" />),
+  Inbox: mk(<path d="M22 12h-6l-2 3h-4l-2-3H2M5.5 5.1L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.5-6.9A2 2 0 0016.7 4H7.3a2 2 0 00-1.8 1.1z" />),
   FileText: mk(<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5zM14 3v5h5M9 13h6M9 17h4" />),
   Folder: mk(<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />),
   QrCode: mk(<path d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 3h3m3 0v3m0-6h-3m0 0v-3m0 6h3" />),
@@ -692,48 +787,3 @@ export const Icons = {
   Grid: mk(<path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z" />),
   TrendingUp: mk(<path d="M3 17l6-6 4 4 8-8m0 0h-5m5 0v5" />),
 };
-
-/* ───────────────────────── Activity Ticker ───────────────────────── */
-export function ActivityTicker({ items = [] }) {
-  if (!items || items.length === 0) {
-    return (
-      <div className="relative w-full overflow-hidden border-b border-border bg-muted/20 py-2.5 text-center text-xs text-muted-foreground">
-        No recent file movements in this ward.
-      </div>
-    );
-  }
-
-  // Duplicate items to ensure smooth continuous marquee effect
-  const repeatedItems = [...items, ...items, ...items];
-
-  return (
-    <div className="relative w-full overflow-hidden border-b border-border bg-muted/25 py-2.5">
-      <div className="flex w-max animate-marquee whitespace-nowrap gap-12 text-xs font-medium text-muted-foreground select-none">
-        {repeatedItems.map((item, idx) => {
-          if (!item) return null;
-          const fileUid = item.fileId?.fileUid || 'File';
-          const title = item.fileId?.title || 'Untitled';
-          const action =
-            item.actionType === 'forward'
-              ? 'routed to'
-              : item.actionType === 'backtrack'
-              ? 'backtracked to'
-              : 'registered at';
-          const dest = item.toLocation || item.fromLocation || 'Reception';
-          
-          return (
-            <span key={idx} className="inline-flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="font-mono text-xs font-semibold text-primary">{fileUid}</span>
-              <span className="text-muted-foreground font-normal">{action}</span>
-              <span className="font-semibold text-foreground">{dest}</span>
-              <span className="opacity-60 font-normal">({title})</span>
-            </span>
-          );
-        })}
-      </div>
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-background to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-background to-transparent" />
-    </div>
-  );
-}

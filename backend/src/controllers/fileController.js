@@ -551,17 +551,28 @@ export async function searchFiles(req, res, next) {
 }
 
 /**
- * Retrieve all open files for the officer's ward to populate the workspace inbox queues.
+ * Retrieve open files for the officer's inbox.
+ * `scope=ward` (default) returns every open file in the officer's ward;
+ * `scope=desk` narrows to files currently sitting at the officer's own desk
+ * (powers the header notification bell). `limit` caps the result set.
  */
 export async function getOfficerInbox(req, res, next) {
   try {
     const wardCode = req.user.wardCode;
+    const { scope = 'ward', limit } = req.query;
 
-    // Fetch all open files in this ward, ordered by most recently updated
-    const files = await File.find({ wardCode, isClosed: false })
+    const filter = { wardCode, isClosed: false };
+    if (scope === 'desk') filter.currentLocation = req.user.deskLocation;
+
+    let query = File.find(filter)
+      .select('fileUid trackingId title citizenName currentStatus currentLocation updatedAt createdAt')
       .sort({ updatedAt: -1 })
-      .populate('assignedOfficerId', 'name deskLocation')
-      .lean();
+      .limit(Math.min(Number(limit) || 200, 200));
+
+    // Officer attribution only matters for the ward-wide queue view
+    if (scope !== 'desk') query = query.populate('assignedOfficerId', 'name deskLocation');
+
+    const files = await query.lean();
 
     return res.json({
       success: true,

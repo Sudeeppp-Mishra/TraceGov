@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, saveSession, getStoredUser } from '../lib/api';
-import { Button, Input, Icons } from '../components/ui';
+import { Button, Input, Icons, Tabs, Alert } from '../components/ui';
 import { Logo, ThemeToggle } from '../components/layout';
 
 const DEMO = {
@@ -50,20 +50,19 @@ export default function LoginPage() {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* Left brand panel */}
-      <aside className="relative hidden overflow-hidden bg-navy-900 lg:flex lg:flex-col lg:justify-between lg:p-12">
-        <div className="pointer-events-none absolute -left-20 top-1/3 h-72 w-72 rounded-full bg-emerald-500/20 blur-3xl" aria-hidden="true" />
-        <div className="relative">
+      <aside className="hidden bg-navy-900 lg:flex lg:flex-col lg:justify-between lg:p-12">
+        <div>
           <Link to="/" className="inline-flex items-center gap-2.5">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white"><Icons.Route className="h-5 w-5" /></span>
             <span className="text-[15px] font-bold tracking-tight text-white">TraceGov</span>
           </Link>
         </div>
-        <div className="relative max-w-md">
+        <div className="max-w-md">
           <Icons.ShieldCheck className="h-10 w-10 text-emerald-400" />
           <h2 className="mt-6 text-3xl font-bold leading-tight text-white">The trusted terminal for government file processing.</h2>
           <p className="mt-4 text-navy-100">Every action you take is recorded on a tamper-proof cryptographic ledger — accountable, permanent, and transparent to the citizens you serve.</p>
         </div>
-        <div className="relative flex items-center gap-6 text-xs text-navy-200">
+        <div className="flex items-center gap-6 text-xs text-navy-200">
           <span className="flex items-center gap-1.5"><Icons.Lock className="h-4 w-4" /> Encrypted sessions</span>
           <span className="flex items-center gap-1.5"><Icons.ShieldCheck className="h-4 w-4" /> SHA-256 ledger</span>
         </div>
@@ -83,18 +82,15 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Sign in to your portal</h1>
           <p className="mt-2 text-sm text-muted-foreground">Officer & administrator verification terminal.</p>
 
-          <div className="mt-7 grid grid-cols-2 gap-1 rounded-xl border border-border bg-muted p-1">
-            {['officer', 'admin'].map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => { setRole(r); setError(''); }}
-                className={`rounded-lg py-2 text-xs font-semibold capitalize transition-all cursor-pointer ${role === r ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-              >
-                {r === 'officer' ? 'Officer' : 'Administrator'}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            className="mt-7"
+            tabs={[
+              { id: 'officer', label: 'Officer' },
+              { id: 'admin', label: 'Administrator' },
+            ]}
+            active={role}
+            onChange={(r) => { setRole(r); setError(''); }}
+          />
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <Input label="Work email address" id="email" type="email" placeholder="officer@ward.gov.np"
@@ -105,10 +101,7 @@ export default function LoginPage() {
               value={password} onChange={(e) => setPassword(e.target.value)} required disabled={loading} autoComplete="current-password" />
 
             {error && (
-              <div className="flex items-start gap-2.5 rounded-xl border border-red-500/20 bg-red-500/5 p-3.5 text-xs font-medium text-red-600 dark:text-red-400 animate-shake" role="alert">
-                <Icons.AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>{error}</span>
-              </div>
+              <Alert tone="error" className="animate-shake">{error}</Alert>
             )}
 
             <Button type="submit" variant="primary" size="lg" className="w-full" loading={loading}>

@@ -4,11 +4,9 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { api, getStoredUser } from '../lib/api';
 import {
   Container, Card, Button, Input, Select, Textarea, Badge, Modal, Icons,
-  StatCard, Skeleton, EmptyState, Timeline, TimelineItem, useToast, Spinner,
+  StatCard, Skeleton, EmptyState, Timeline, TimelineItem, useToast, Spinner, Tabs,
 } from '../components/ui';
 import { AppShell, PageHeading } from '../components/layout';
-
-
 
 export default function OfficerDashboard() {
   const navigate = useNavigate();
@@ -18,7 +16,6 @@ export default function OfficerDashboard() {
   const [metrics, setMetrics] = useState(null);
   const [departmentQueue, setDepartmentQueue] = useState([]);
   const [recentHistory, setRecentHistory] = useState([]);
-  const [officers, setOfficers] = useState([]);
   const [departmentsList, setDepartmentsList] = useState([]);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,15 +68,13 @@ export default function OfficerDashboard() {
   const loadDashboard = async (wardCode) => {
     try {
       setLoading(true);
-      const [summary, officersList, deptsData] = await Promise.all([
+      const [summary, deptsData] = await Promise.all([
         api.dashboardSummary({ wardCode }),
-        api.getOfficers().catch(() => []),
         api.getDepartments().catch(() => ({ departments: [] })),
       ]);
       setMetrics(summary.metrics);
       setDepartmentQueue(summary.departmentQueue || []);
       setRecentHistory(summary.recentHistory || []);
-      setOfficers(officersList);
       setDepartmentsList(deptsData.departments || []);
     } catch (err) {
       toast.error('Failed to load dashboard metrics.');
@@ -227,7 +222,7 @@ export default function OfficerDashboard() {
   ]), []);
 
   return (
-    <AppShell user={currentUser} kicker={currentUser ? `Ward ${currentUser.wardCode}` : ''}>
+    <AppShell user={currentUser}>
       <Container size="wide" className="space-y-8 pt-8">
         <PageHeading
           breadcrumbs={['Workspace']}
@@ -289,15 +284,7 @@ export default function OfficerDashboard() {
                         >
                           <div className="min-w-0">
                             <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
-                            <span className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                              <span className="truncate">{file.title}</span>
-                              {!['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
-                                <span className="relative flex h-2 w-2 shrink-0">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
-                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
-                                </span>
-                              )}
-                            </span>
+                            <span className="mt-0.5 block truncate text-sm font-semibold text-foreground">{file.title}</span>
                             <span className="text-xs text-muted-foreground">{file.citizenName} · {file.currentLocation}</span>
                           </div>
                           <Badge status={file.currentStatus} />
@@ -314,14 +301,14 @@ export default function OfficerDashboard() {
               <Skeleton className="h-80" />
             ) : selectedFile ? (
               <div className="space-y-6 animate-fade-up">
-                <Card className="p-6">
+                <Card>
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-mono text-xs text-muted-foreground">{selectedFile.fileUid}</span>
-                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${isAuditValid ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400'}`}>
-                          <Icons.ShieldCheck className="h-3 w-3" /> {isAuditValid ? 'Ledger verified' : 'Integrity fail'}
-                        </span>
+                        {isAuditValid
+                          ? <Badge status="Verified">Ledger verified</Badge>
+                          : <Badge status="Rejected">Ledger broken</Badge>}
                       </div>
                       <h3 className="mt-2 text-xl font-bold text-foreground">{selectedFile.title}</h3>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -331,31 +318,27 @@ export default function OfficerDashboard() {
                     <Badge status={selectedFile.currentStatus} />
                   </div>
 
-                  <div className="mt-5 flex gap-1 rounded-xl border border-border bg-muted p-1">
-                    {tabs.map((tab) => (
-                      <button key={tab.id}
-                        onClick={() => { setActionTab(tab.id); if (tab.id === 'ai' && !aiDelayReport) checkAiInsights(); }}
-                        className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all cursor-pointer ${actionTab === tab.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                        <tab.icon className="h-3.5 w-3.5" /> {tab.label}
-                      </button>
-                    ))}
-                  </div>
+                  <Tabs
+                    className="mt-5"
+                    tabs={tabs}
+                    active={actionTab}
+                    onChange={(id) => { setActionTab(id); if (id === 'ai' && !aiDelayReport) checkAiInsights(); }}
+                  />
 
                   <div className="mt-5">
                     {actionTab === 'forward' && (
                       <form onSubmit={handleForwardFile} className="space-y-4">
-                        <div className="grid gap-4 sm:grid-cols-3">
+                        <div className="grid gap-4 sm:grid-cols-2">
                           <Select label="Target desk" id="f_loc" value={nextLocation} onChange={(e) => setNextLocation(e.target.value)} required={!['Approved', 'Dispatched'].includes(nextStatus)}>
                             <option value="">Choose desk…</option>
                             {departmentsList.filter((d) => d.isActive).map((d) => (
                               <option key={d.name} value={d.name}>{d.name}</option>
                             ))}
                           </Select>
-                          <Select label="Assign officer" id="f_off">
-                            <option value="">Auto-assign section staff…</option>
-                            {officers.map((off) => <option key={off._id || off.id} value={off._id || off.id}>{off.name} ({off.deskLocation})</option>)}
-                          </Select>
-                          <Select label="Update file status" id="f_status" value={nextStatus} onChange={(e) => setNextStatus(e.target.value)} required>
+                          <Select
+                            label="Update file status" id="f_status" value={nextStatus} onChange={(e) => setNextStatus(e.target.value)} required
+                            hint={['Approved', 'Dispatched'].includes(nextStatus) ? 'Final status — target desk is optional.' : undefined}
+                          >
                             <option value="Pending">Pending (Under routing)</option>
                             <option value="Under Review">Under Review (Details verification)</option>
                             <option value="Verified">Verified (Verification complete)</option>
@@ -401,20 +384,20 @@ export default function OfficerDashboard() {
                         ) : (
                           <>
                             {aiDelayReport && (
-                              <div className="grid gap-4 sm:grid-cols-3">
+                              <dl className="grid gap-4 sm:grid-cols-3">
                                 <div className="rounded-xl border border-border bg-muted/40 p-3">
-                                  <span className="text-xs font-semibold uppercase text-muted-foreground">Delay risk</span>
-                                  <span className={`mt-1 block text-xl font-bold ${aiDelayReport.delayProbability > 70 ? 'text-red-500' : aiDelayReport.delayProbability > 40 ? 'text-amber-500' : 'text-emerald-500'}`}>{aiDelayReport.delayProbability}%</span>
+                                  <dt className="text-xs font-semibold uppercase text-muted-foreground">Delay risk</dt>
+                                  <dd className={`mt-1 text-xl font-bold ${aiDelayReport.delayProbability > 70 ? 'text-red-500' : aiDelayReport.delayProbability > 40 ? 'text-amber-500' : 'text-emerald-500'}`}>{aiDelayReport.delayProbability}%</dd>
                                 </div>
                                 <div className="rounded-xl border border-border bg-muted/40 p-3">
-                                  <span className="text-xs font-semibold uppercase text-muted-foreground">Expected dwell</span>
-                                  <span className="mt-1 block text-xl font-bold text-foreground">{aiDelayReport.expectedProcessingHours}h</span>
+                                  <dt className="text-xs font-semibold uppercase text-muted-foreground">Expected dwell</dt>
+                                  <dd className="mt-1 text-xl font-bold text-foreground">{aiDelayReport.expectedProcessingHours}h</dd>
                                 </div>
                                 <div className="rounded-xl border border-border bg-muted/40 p-3">
-                                  <span className="text-xs font-semibold uppercase text-muted-foreground">Confidence</span>
-                                  <span className="mt-1 block text-xl font-bold capitalize text-foreground">{aiDelayReport.confidenceScore}</span>
+                                  <dt className="text-xs font-semibold uppercase text-muted-foreground">Confidence</dt>
+                                  <dd className="mt-1 text-xl font-bold capitalize text-foreground">{aiDelayReport.confidenceScore}</dd>
                                 </div>
-                              </div>
+                              </dl>
                             )}
                             {aiBacktrackSuggest && (
                               <div className="rounded-xl border border-primary/15 bg-primary/[0.02] p-4">
@@ -442,15 +425,14 @@ export default function OfficerDashboard() {
                   </div>
                 </Card>
 
-                <Card className="p-6">
+                <Card>
                   <h4 className="mb-5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Ledger movement history</h4>
                   {selectedFileHistory.length > 0 ? (
                     <Timeline>
                       {selectedFileHistory.map((item, idx) => (
                         <TimelineItem key={idx} title={item.actionType}
                           meta={new Date(item.timestamp).toLocaleString()}
-                          tone={item.actionType === 'Backtracked' ? 'red' : 'primary'}
-                          last={idx === selectedFileHistory.length - 1}>
+                          tone={item.actionType === 'Backtracked' ? 'red' : 'primary'}>
                           <p className="text-xs font-medium text-foreground/70">{item.currentLocation} · {item.officerId?.name}</p>
                           {item.notes && <p className="mt-1">{item.notes}</p>}
                         </TimelineItem>
@@ -472,58 +454,27 @@ export default function OfficerDashboard() {
           </div>
 
           {/* Sidebar */}
-          <div className="space-y-6">
-            <Card className="p-6">
-              <h4 className="mb-4 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Recent actions</h4>
-              {loading ? (
-                <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
-              ) : recentHistory.length > 0 ? (
-                <div className="max-h-[420px] divide-y divide-border overflow-y-auto pr-1">
-                  {recentHistory.map((hist, idx) => (
-                    <div key={idx} className="py-3 text-xs first:pt-0 last:pb-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-mono text-xs text-muted-foreground">{hist.fileId?.fileUid}</span>
-                        <Badge status={hist.actionType} dot={false} />
-                      </div>
-                      <p className="mt-1 flex items-center gap-1.5 font-semibold text-foreground">
-                        <span className="truncate">{hist.fileId?.title}</span>
-                        {!['Approved', 'Verified', 'Dispatched'].includes(hist.actionType) && (
-                          <span className="relative flex h-1.5 w-1.5 shrink-0">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500"></span>
-                          </span>
-                        )}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">{hist.officerId?.name} · {hist.currentLocation}</p>
+          <Card>
+            <h4 className="mb-4 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Recent actions</h4>
+            {loading ? (
+              <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
+            ) : recentHistory.length > 0 ? (
+              <div className="max-h-[420px] divide-y divide-border overflow-y-auto pr-1">
+                {recentHistory.map((hist, idx) => (
+                  <div key={idx} className="py-3 text-xs first:pt-0 last:pb-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-mono text-xs text-muted-foreground">{hist.fileId?.fileUid}</span>
+                      <Badge status={hist.actionType} dot={false} />
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="py-6 text-center text-xs italic text-muted-foreground">No recent activity.</p>
-              )}
-            </Card>
-
-            <Card className="p-6">
-              <h4 className="mb-4 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Ward section queues</h4>
-              {loading ? (
-                <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-6" />)}</div>
-              ) : departmentQueue.length > 0 ? (
-                <div className="space-y-3">
-                  {departmentQueue.map((dept) => (
-                    <div key={dept._id} className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-foreground">{dept._id}</span>
-                      <div className="flex gap-2">
-                        {dept.pending > 0 && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-xs font-semibold text-amber-500">{dept.pending} delayed</span>}
-                        <span className="rounded bg-muted px-2 py-0.5 text-xs font-bold text-foreground">{dept.count}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="py-6 text-center text-xs italic text-muted-foreground">No active queues.</p>
-              )}
-            </Card>
-          </div>
+                    <p className="mt-1 truncate font-semibold text-foreground">{hist.fileId?.title}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{hist.officerId?.name} · {hist.currentLocation}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="py-6 text-center text-xs italic text-muted-foreground">No recent activity.</p>
+            )}
+          </Card>
         </div>
       </Container>
 

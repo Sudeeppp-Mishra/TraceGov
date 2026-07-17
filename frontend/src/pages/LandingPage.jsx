@@ -18,7 +18,7 @@ function LandingNav() {
         <Logo />
         <nav className="hidden items-center gap-1 md:flex">
           {links.map((l) => (
-            <a key={l.href} href={l.href} className="rounded-lg px-3 py-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            <a key={l.href} href={l.href} className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
               {l.label}
             </a>
           ))}
@@ -49,26 +49,19 @@ function LandingNav() {
 /* ═══════════════════════════ Hero ═══════════════════════════ */
 function Hero() {
   return (
-    <section className="relative overflow-hidden pt-32 pb-20 sm:pt-40 sm:pb-24">
-      {/* Single soft glow — no grid/dot pattern, keeps dark mode clean */}
-      <div className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[820px] -translate-x-1/2 rounded-full bg-emerald-500/10 blur-[120px]" aria-hidden="true" />
-      <Container className="relative">
+    <section className="pt-32 pb-20 sm:pt-40 sm:pb-24">
+      <Container>
         <div className="mx-auto max-w-3xl text-center">
           <Reveal>
             <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-medium text-muted-foreground shadow-sm">
-              <span className="flex h-2 w-2 items-center justify-center">
-                <span className="absolute h-2 w-2 animate-ping rounded-full bg-emerald-500/60" />
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              </span>
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
               Digital transparency for public services
             </span>
           </Reveal>
           <Reveal delay={80}>
             <h1 className="mt-6 text-4xl font-bold tracking-tight text-foreground sm:text-6xl">
               Track every government file,
-              <span className="block bg-gradient-to-r from-navy-700 to-emerald-600 bg-clip-text text-transparent dark:from-navy-200 dark:to-emerald-400">
-                from desk to decision.
-              </span>
+              <span className="block">from desk to decision.</span>
             </h1>
           </Reveal>
           <Reveal delay={160}>
@@ -127,7 +120,7 @@ function HeroPreview() {
           {steps.map((s, i) => (
             <div key={s.label} className="text-left">
               <div className="flex items-center gap-1">
-                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${s.done ? 'bg-emerald-500 text-white' : s.active ? 'bg-primary text-primary-foreground animate-pulse-ring' : 'bg-muted text-muted-foreground'}`}>
+                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${s.done ? 'bg-emerald-500 text-white' : s.active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
                   {s.done ? '✓' : i + 1}
                 </span>
                 {i < steps.length - 1 && <span className={`h-0.5 flex-1 rounded ${s.done ? 'bg-emerald-500' : 'bg-border'}`} />}
@@ -304,10 +297,10 @@ function Workflows() {
         </Reveal>
         <div className="mt-14 grid gap-6 lg:grid-cols-2">
           <Reveal>
-            <WorkflowCard tone="navy" eyebrow="For officers" title="A rigorous processing terminal" icon={Icons.Building} items={officer} cta={{ to: '/login', label: 'Open officer portal' }} />
+            <WorkflowCard tone="navy" eyebrow="For officers" title="A rigorous processing terminal" icon={Icons.Building} items={officer} />
           </Reveal>
           <Reveal delay={100}>
-            <WorkflowCard tone="emerald" eyebrow="For citizens" title="Radical transparency, zero friction" icon={Icons.Users} items={citizen} cta={{ to: '/track', label: 'Track a file' }} />
+            <WorkflowCard tone="emerald" eyebrow="For citizens" title="Radical transparency, zero friction" icon={Icons.Users} items={citizen} />
           </Reveal>
         </div>
       </Container>
@@ -315,7 +308,7 @@ function Workflows() {
   );
 }
 
-function WorkflowCard({ tone, eyebrow, title, icon: Icon, items, cta }) {
+function WorkflowCard({ tone, eyebrow, title, icon: Icon, items }) {
   const accent = tone === 'emerald' ? 'text-emerald-600 dark:text-emerald-400' : 'text-navy-600 dark:text-navy-300';
   const bg = tone === 'emerald' ? 'bg-emerald-500/10' : 'bg-navy-500/10';
   return (
@@ -333,11 +326,6 @@ function WorkflowCard({ tone, eyebrow, title, icon: Icon, items, cta }) {
           </li>
         ))}
       </ul>
-      <div className="mt-8 pt-2">
-        <Button as={Link} to={cta.to} variant={tone === 'emerald' ? 'accent' : 'primary'} className="w-full sm:w-auto">
-          {cta.label} <Icons.ArrowRight className="h-4 w-4" />
-        </Button>
-      </div>
     </div>
   );
 }
@@ -392,16 +380,17 @@ function CtaBand() {
     <section className="py-24">
       <Container>
         <Reveal>
-          {/* Single glow accent — dot pattern removed to keep dark mode clean */}
-          <div className="relative overflow-hidden rounded-3xl border border-navy-800 bg-navy-900 px-8 py-16 text-center shadow-2xl sm:px-16">
-            <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-emerald-500/20 blur-3xl" aria-hidden="true" />
-            <div className="relative">
-              <h2 className="mx-auto max-w-2xl text-3xl font-bold tracking-tight text-white sm:text-4xl">Bring transparency to your registry</h2>
-              <p className="mx-auto mt-4 max-w-xl text-lg text-navy-100">Start tracking files today, or sign in to the officer terminal to process the queue.</p>
-              <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                <Button as={Link} to="/track" variant="accent" size="lg" className="w-full sm:w-auto">Track a file <Icons.ArrowRight className="h-4 w-4" /></Button>
-                <Button as={Link} to="/login" size="lg" className="w-full !bg-white !text-navy-900 hover:!bg-navy-50 sm:w-auto">Officer sign in</Button>
-              </div>
+          <div className="rounded-3xl border border-navy-800 bg-navy-900 px-8 py-16 text-center shadow-2xl sm:px-16">
+            <h2 className="mx-auto max-w-2xl text-3xl font-bold tracking-tight text-white sm:text-4xl">Bring transparency to your registry</h2>
+            <p className="mx-auto mt-4 max-w-xl text-lg text-navy-100">Start tracking files today, or sign in to the officer terminal to process the queue.</p>
+            <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <Button as={Link} to="/track" variant="accent" size="lg" className="w-full sm:w-auto">Track a file <Icons.ArrowRight className="h-4 w-4" /></Button>
+              <Link
+                to="/login"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-6 py-3 text-[15px] font-medium text-navy-900 shadow-sm transition-all duration-200 hover:bg-navy-50 sm:w-auto"
+              >
+                Officer sign in
+              </Link>
             </div>
           </div>
         </Reveal>

@@ -4,12 +4,9 @@ import { api, getStoredUser } from '../lib/api';
 import {
   Container, Card, Button, Input, Select, Modal, Icons, StatCard, Skeleton,
   EmptyState, useToast, Tabs, BarChart, BarList, DonutChart, Chip, Badge,
-  Textarea,
+  Textarea, Alert,
 } from '../components/ui';
 import { AppShell, PageHeading } from '../components/layout';
-
-const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const WEEK_WEIGHTS = [0.19, 0.21, 0.17, 0.18, 0.15, 0.06, 0.04];
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -27,7 +24,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [formLoading, setFormLoading] = useState(false);
   const [error, setError] = useState('');
-  const [recentHistory, setRecentHistory] = useState([]);
+  const [weekly, setWeekly] = useState([]);
 
   // Dynamic Departments State
   const [departmentsList, setDepartmentsList] = useState([]);
@@ -46,16 +43,17 @@ export default function AdminDashboard() {
     setLoading(true);
     setError('');
     try {
-      const [summary, roster, deptsData] = await Promise.all([
+      const [summary, roster, deptsData, weeklyData] = await Promise.all([
         api.dashboardSummary({ wardCode, allWards: 'true' }),
         api.getOfficers(),
         api.getDepartments(),
+        api.getWeeklyThroughput({ allWards: 'true' }).catch(() => ({ days: [] })),
       ]);
       setOfficers(roster);
       setOfficerStats(summary.officerStats || []);
       setFilesUnderAudit(summary.recentFiles || []);
       setDepartmentsList(deptsData.departments || []);
-      setRecentHistory(summary.recentHistory || []);
+      setWeekly((weeklyData.days || []).map((d) => ({ label: d.label, value: d.count })));
 
       // Default staff select assignment to the first active department
       const activeDepts = (deptsData.departments || []).filter((d) => d.isActive);
@@ -113,7 +111,7 @@ export default function AdminDashboard() {
 
   const handleToggleDeptActive = async (id) => {
     try {
-      await api.deleteDepartment(id);
+      await api.toggleDepartment(id);
       toast.success('Department status updated.');
       await loadAdministration(currentUser.wardCode);
     } catch (err) {
@@ -172,11 +170,6 @@ export default function AdminDashboard() {
     return ranked;
   }, [filesUnderAudit, departmentsList]);
 
-  const weekly = useMemo(() => {
-    const base = Math.max(stats.routed, WEEK.length);
-    return WEEK.map((d, i) => ({ label: d, value: Math.max(1, Math.round(base * WEEK_WEIGHTS[i])) }));
-  }, [stats.routed]);
-
   const departments = useMemo(() => departmentsList.map((d) => ({
     id: d._id,
     name: d.name,
@@ -194,7 +187,7 @@ export default function AdminDashboard() {
   ];
 
   return (
-    <AppShell user={currentUser} kicker="Administration">
+    <AppShell user={currentUser}>
       <Container size="wide" className="space-y-8 pt-8">
         <PageHeading
           breadcrumbs={['Administration']}
@@ -205,24 +198,14 @@ export default function AdminDashboard() {
               <Button variant="outline" onClick={runSecurityAudit} loading={auditing}>
                 <Icons.ShieldCheck className="h-4 w-4" /> Run ledger audit
               </Button>
-              {tab === 'departments' ? (
-                <Button variant="primary" onClick={() => setIsAddDeptOpen(true)}>
-                  <Icons.Plus className="h-4 w-4" /> Add department
-                </Button>
-              ) : (
-                <Button variant="primary" onClick={() => setIsAddStaffOpen(true)}>
-                  <Icons.Plus className="h-4 w-4" /> Add officer
-                </Button>
-              )}
+              <Button variant="primary" onClick={() => setIsAddStaffOpen(true)}>
+                <Icons.Plus className="h-4 w-4" /> Add officer
+              </Button>
             </>
           }
         />
 
-        {error && (
-          <div className="flex items-start gap-2.5 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm font-medium text-red-600 dark:text-red-400">
-            <Icons.AlertCircle className="mt-0.5 h-4.5 w-4.5 shrink-0" /> {error}
-          </div>
-        )}
+        {error && <Alert tone="error">{error}</Alert>}
 
         {loading ? (
           <div className="space-y-6">
@@ -251,79 +234,36 @@ export default function AdminDashboard() {
                   {filesUnderAudit.length === 0 ? (
                     <EmptyState className="m-4 border-0" icon={<Icons.FileText className="h-6 w-6" />} title="No files to audit" description="Registered files appear here for ledger verification." />
                   ) : (
-                    <>
-                      {/* Desktop / tablet: full table */}
-                      <div className="hidden overflow-x-auto sm:block">
-                        <table className="w-full text-left text-sm">
-                          <thead>
-                            <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
-                              <th className="px-6 py-3 font-semibold">File UID</th>
-                              <th className="px-2 py-3 font-semibold">Title</th>
-                              <th className="px-2 py-3 font-semibold">Desk</th>
-                              <th className="px-6 py-3 text-right font-semibold">Chain</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-border/60">
-                            {filesUnderAudit.map((file) => (
-                              <tr key={file.fileUid} className="transition-colors hover:bg-muted/30">
-                                <td className="px-6 py-3 font-mono text-xs text-muted-foreground">{file.fileUid}</td>
-                                <td className="max-w-[160px] px-2 py-3 font-semibold text-foreground">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate">{file.title}</span>
-                                    {!['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
-                                      <span className="relative flex h-1.5 w-1.5 shrink-0">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500"></span>
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="px-2 py-3 text-muted-foreground">{file.currentLocation}</td>
-                                <td className="px-6 py-3 text-right">
-                                  {file.isValidated ? (
-                                    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${file.isChainIntact ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400'}`}>
-                                      {file.isChainIntact ? <><Icons.Check className="h-3 w-3" /> Intact</> : <><Icons.AlertCircle className="h-3 w-3" /> Tampered</>}
-                                    </span>
-                                  ) : (
-                                    <span className="text-xs italic text-muted-foreground">Not checked</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {/* Mobile: card list carrying the same data as the table above */}
-                      <div className="divide-y divide-border sm:hidden">
-                        {filesUnderAudit.map((file) => (
-                          <div key={file.fileUid} className="flex items-start justify-between gap-3 px-4 py-3.5">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
-                                {!['Approved', 'Verified', 'Dispatched'].includes(file.currentStatus) && (
-                                  <span className="relative flex h-1.5 w-1.5 shrink-0">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-sky-500"></span>
-                                  </span>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
+                            <th className="px-6 py-3 font-semibold">File UID</th>
+                            <th className="px-2 py-3 font-semibold">Title</th>
+                            <th className="px-2 py-3 font-semibold">Desk</th>
+                            <th className="px-6 py-3 text-right font-semibold">Chain</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/60">
+                          {filesUnderAudit.map((file) => (
+                            <tr key={file.fileUid} className="transition-colors hover:bg-muted/30">
+                              <td className="px-6 py-3 font-mono text-xs text-muted-foreground">{file.fileUid}</td>
+                              <td className="max-w-[160px] truncate px-2 py-3 font-semibold text-foreground">{file.title}</td>
+                              <td className="px-2 py-3 text-muted-foreground">{file.currentLocation}</td>
+                              <td className="px-6 py-3 text-right">
+                                {file.isValidated ? (
+                                  file.isChainIntact
+                                    ? <Badge status="Verified" dot={false}>Intact</Badge>
+                                    : <Badge status="Rejected" dot={false}>Tampered</Badge>
+                                ) : (
+                                  <span className="text-xs italic text-muted-foreground">Not checked</span>
                                 )}
-                              </div>
-                              <p className="mt-1 truncate text-sm font-semibold text-foreground">{file.title}</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">{file.currentLocation}</p>
-                            </div>
-                            <div className="shrink-0 pt-0.5">
-                              {file.isValidated ? (
-                                <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${file.isChainIntact ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400'}`}>
-                                  {file.isChainIntact ? <><Icons.Check className="h-3 w-3" /> Intact</> : <><Icons.AlertCircle className="h-3 w-3" /> Tampered</>}
-                                </span>
-                              ) : (
-                                <span className="text-xs italic text-muted-foreground">Not checked</span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </Card>
 
@@ -370,11 +310,15 @@ export default function AdminDashboard() {
                   <div className="mb-5 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Icons.TrendingUp className="h-4.5 w-4.5 text-primary" />
-                      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Weekly throughput</h3>
+                      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Movements per day</h3>
                     </div>
-                    <Chip>Files routed / day</Chip>
+                    <Chip>Last 7 days</Chip>
                   </div>
-                  <BarChart data={weekly} />
+                  {weekly.length > 0 ? (
+                    <BarChart data={weekly} />
+                  ) : (
+                    <EmptyState className="border-0" icon={<Icons.TrendingUp className="h-6 w-6" />} title="No movement data" description="Daily throughput appears once files start moving." />
+                  )}
                 </Card>
 
                 <Card className="flex flex-col items-center justify-center">
@@ -411,43 +355,46 @@ export default function AdminDashboard() {
 
             {/* ── Departments ── */}
             {tab === 'departments' && (
-              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-5">
+                <div className="flex justify-end">
+                  <Button variant="primary" onClick={() => setIsAddDeptOpen(true)}>
+                    <Icons.Plus className="h-4 w-4" /> Add department
+                  </Button>
+                </div>
+                <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                 {departments.map((d) => (
-                  <Card key={d.name} hover className="flex flex-col p-5">
+                  <Card key={d.name} hover className="flex flex-col">
                     <div className="flex items-start justify-between">
                       <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary">
                         <Icons.Building className="h-5 w-5" />
                       </span>
-                      <div className="flex items-center gap-1">
-                        <Badge status={d.isActive ? 'Approved' : 'Rejected'} dot={false} className="!text-xs !px-2">
-                          {d.isActive ? 'Active' : 'Inactive'}
-                        </Badge>
-                        <button
-                          onClick={() => handleToggleDeptActive(d.id)}
-                          className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
-                          title={d.isActive ? 'Deactivate department' : 'Activate department'}
-                          aria-label={d.isActive ? 'Deactivate' : 'Activate'}
-                        >
-                          <Icons.Lock className="h-4 w-4" />
-                        </button>
-                      </div>
+                      <Badge status={d.isActive ? 'Active' : 'Inactive'} />
                     </div>
                     <h3 className="mt-4 text-sm font-semibold text-foreground">
                       {d.name} <span className="font-mono text-xs text-muted-foreground">({d.code})</span>
                     </h3>
                     {d.description && <p className="mt-1.5 text-xs text-muted-foreground line-clamp-2">{d.description}</p>}
-                    <div className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4">
+                    <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4">
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Officers</p>
-                        <p className="mt-0.5 text-lg font-bold text-foreground">{d.officers}</p>
+                        <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Officers</dt>
+                        <dd className="mt-0.5 text-lg font-bold text-foreground">{d.officers}</dd>
                       </div>
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Active files</p>
-                        <p className="mt-0.5 text-lg font-bold text-foreground">{d.files}</p>
+                        <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Active files</dt>
+                        <dd className="mt-0.5 text-lg font-bold text-foreground">{d.files}</dd>
                       </div>
-                    </div>
+                    </dl>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-4"
+                      onClick={() => handleToggleDeptActive(d.id)}
+                    >
+                      {d.isActive ? 'Deactivate' : 'Activate'}
+                    </Button>
                   </Card>
                 ))}
+                </div>
               </div>
             )}
           </div>

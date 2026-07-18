@@ -6,3 +6,4 @@ numpy==2.2.1
 scikit-learn==1.6.0
 pydantic==2.10.4
 Pillow==11.1.0
+certifi>=2024.12.14

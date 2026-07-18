@@ -11,8 +11,8 @@
     "dev": "concurrently -n backend,frontend,ai -c blue,green,magenta \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\" \"npm run dev:ai\"",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
-    "dev:ai": "cd ai-service && uvicorn main:app --reload --port 8000",
-    "install:all": "npm install && cd ai-service && pip install -r requirements.txt"
+    "dev:ai": "cd ai-service && ./.venv/bin/uvicorn main:app --reload --port 8000",
+    "install:all": "npm install && cd ai-service && python3.11 -m venv .venv && ./.venv/bin/pip install -r requirements.txt"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

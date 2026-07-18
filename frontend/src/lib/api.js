@@ -128,6 +128,15 @@ export const api = {
   trackCitizen: (trackingId) => request(`/track/${trackingId}`),
 
   // --- AI Analytics API ---
+  // OCR document scan (Nepali + English). Sends a base64 data-URL image plus the
+  // required-documents checklist; OCR on CPU is slow, so callers should show a
+  // long-running loading state.
+  analyzeDocument: (payload) =>
+    request('/ai/analyze-document', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   estimateCompletion: (trackingId) =>
     request('/ai/estimate-completion', {
       method: 'POST',

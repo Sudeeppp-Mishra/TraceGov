@@ -1,6 +1,6 @@
 """
 TraceGov AI Microservice
-- Document OCR analysis (EasyOCR) for missing document detection
+- Document OCR analysis (EasyOCR, English + Nepali/Devanagari) for missing document detection
 - M/M/1 queueing model for file completion time estimation
 """
 
@@ -9,11 +9,19 @@ from __future__ import annotations
 import base64
 import io
 import math
+import os
 import re
 from datetime import datetime, timedelta
 from typing import Any
 
+import certifi
 import numpy as np
+
+# macOS python.org installs often lack a default CA bundle, which breaks
+# EasyOCR's one-time model downloads with CERTIFICATE_VERIFY_FAILED. Point
+# urllib at certifi's bundle unless the environment already provides one.
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -32,7 +40,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Lazy-load EasyOCR to avoid slow startup when not needed
+# Lazy-load EasyOCR to avoid slow startup when not needed.
+# The reader is initialized with Nepali + English so it can read Devanagari
+# documents (citizenship certificates, ward recommendation letters, lalpurja)
+# as well as English forms. EasyOCR downloads the Devanagari model on first use.
 _ocr_reader = None
 
 
@@ -40,8 +51,37 @@ def get_ocr_reader():
     global _ocr_reader
     if _ocr_reader is None:
         import easyocr
-        _ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        _ocr_reader = easyocr.Reader(["ne", "en"], gpu=False, verbose=False)
     return _ocr_reader
+
+
+DEVANAGARI_RE = re.compile(r"[ऀ-ॿ]")
+
+# Vowel signs (matras), virama, and nukta. EasyOCR frequently reorders or drops
+# these in Devanagari output (e.g. "नागरिकता" comes back as "नागरकिता"), so
+# matching compares consonant "skeletons" with these marks stripped.
+DEVANAGARI_MARKS_RE = re.compile(r"[ऺ-ॏऀ-ः़ॕ-ॗॢॣ]")
+
+
+def devanagari_skeleton(text: str) -> str:
+    """Lowercased text with Devanagari combining marks and spaces removed."""
+    return DEVANAGARI_MARKS_RE.sub("", text.lower()).replace(" ", "")
+
+
+def detect_script(text: str) -> dict[str, Any]:
+    """Rough language mix of the extracted text, based on Devanagari coverage."""
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return {"language": "unknown", "devanagariRatio": 0.0}
+    devanagari = sum(1 for ch in letters if DEVANAGARI_RE.match(ch))
+    ratio = devanagari / len(letters)
+    if ratio > 0.6:
+        language = "nepali"
+    elif ratio > 0.15:
+        language = "mixed"
+    else:
+        language = "english"
+    return {"language": language, "devanagariRatio": round(ratio, 2)}
 
 
 DEFAULT_KEYWORDS = [
@@ -52,6 +92,44 @@ DEFAULT_KEYWORDS = [
     "Recommendation Letter",
     "Stamp",
 ]
+
+# Nepali (Devanagari) aliases for checklist keywords. Keys are normalized
+# lowercase English keyword fragments; a keyword counts as "found" if either
+# its English form or any Nepali alias appears in the OCR text. Aliases cover
+# the document names used on real ward/municipality paperwork.
+NEPALI_KEYWORD_ALIASES = {
+    "certificate": ["प्रमाणपत्र", "प्रमाण-पत्र", "प्रमाण पत्र"],
+    "citizenship": ["नागरिकता", "नागरिकताको प्रमाणपत्र"],
+    "tax": ["कर", "राजस्व", "मालपोत"],
+    "receipt": ["रसिद", "भरपाई"],
+    "application": ["निवेदन", "दरखास्त"],
+    "form": ["फारम", "फाराम"],
+    "recommendation": ["सिफारिस", "सिफारिश"],
+    "letter": ["पत्र"],
+    "stamp": ["छाप", "टिकट", "दस्तखत"],
+    "birth": ["जन्म", "जन्मदर्ता"],
+    "marriage": ["विवाह", "विवाहदर्ता"],
+    "land": ["जग्गा", "लालपुर्जा", "मालपोत"],
+    "ownership": ["स्वामित्व", "लालपुर्जा"],
+    "photo": ["फोटो", "तस्बिर"],
+    "passport": ["राहदानी"],
+    "business": ["व्यवसाय", "उद्योग"],
+    "registration": ["दर्ता"],
+    "ward": ["वडा"],
+    "municipality": ["नगरपालिका", "गाउँपालिका", "महानगरपालिका"],
+    "signature": ["दस्तखत", "सही"],
+    "clearance": ["चुक्ता", "फरफारक"],
+}
+
+
+def keyword_aliases(keyword: str) -> list[str]:
+    """Nepali alias strings that should count as a match for this keyword."""
+    normalized = keyword.lower()
+    aliases: list[str] = []
+    for fragment, nepali_terms in NEPALI_KEYWORD_ALIASES.items():
+        if fragment in normalized:
+            aliases.extend(nepali_terms)
+    return aliases
 
 
 class AnalyzeDocumentRequest(BaseModel):
@@ -99,17 +177,42 @@ def extract_text_from_image(image_bytes: bytes) -> str:
     return " ".join(str(r) for r in results)
 
 
+def term_matches(term: str, normalized_text: str, skeleton_text: str) -> bool:
+    """True if the term appears in the text, tolerating EasyOCR's Devanagari
+    vowel-sign reordering by also comparing mark-stripped skeletons. Skeleton
+    matching is limited to terms with 3+ base characters — shorter ones (e.g.
+    "कर") lose too much information without their vowel signs and false-match
+    inside unrelated words like "सरकार"."""
+    term_lower = term.lower()
+    if term_lower in normalized_text:
+        return True
+    if DEVANAGARI_RE.search(term):
+        term_skeleton = devanagari_skeleton(term)
+        return len(term_skeleton) >= 3 and term_skeleton in skeleton_text
+    return False
+
+
 def classify_document(text: str) -> dict[str, Any]:
+    # Each label matches on English keywords and their Nepali (Devanagari)
+    # equivalents so photographed Nepali documents classify correctly.
     labels = {
-        "Certificate": ["certificate", "birth", "marriage", "registration"],
-        "Tax Receipt": ["tax", "receipt", "revenue", "payment"],
-        "Citizenship": ["citizenship", "citizen", "nationality", "id no"],
-        "Recommendation Letter": ["recommendation", "recommended", "ward chair", "letter"],
-        "Ward Form": ["ward", "form", "application", "municipality"],
+        "Certificate": ["certificate", "birth", "marriage", "registration",
+                        "प्रमाणपत्र", "प्रमाण पत्र", "जन्म", "विवाह", "दर्ता"],
+        "Tax Receipt": ["tax", "receipt", "revenue", "payment",
+                        "कर", "रसिद", "राजस्व", "मालपोत", "भरपाई"],
+        "Citizenship": ["citizenship", "citizen", "nationality", "id no",
+                        "नागरिकता", "नेपाली नागरिक"],
+        "Recommendation Letter": ["recommendation", "recommended", "ward chair", "letter",
+                                  "सिफारिस", "सिफारिश", "वडा अध्यक्ष"],
+        "Land Document": ["land", "ownership", "plot", "survey",
+                          "जग्गा", "लालपुर्जा", "कित्ता", "नापी"],
+        "Ward Form": ["ward", "form", "application", "municipality",
+                      "वडा", "फारम", "निवेदन", "नगरपालिका", "गाउँपालिका"],
     }
     normalized = text.lower()
+    skeleton = devanagari_skeleton(text)
     scores = {
-        label: sum(1 for word in words if word in normalized)
+        label: sum(1 for word in words if term_matches(word, normalized, skeleton))
         for label, words in labels.items()
     }
     best_label = max(scores, key=scores.get) if scores else "Unknown"
@@ -124,12 +227,14 @@ def classify_document(text: str) -> dict[str, Any]:
 
 def check_keywords(text: str, keywords: list[str]) -> dict[str, Any]:
     normalized = text.lower()
+    skeleton = devanagari_skeleton(text)
     found = []
     missing = []
 
     for kw in keywords:
-        pattern = re.escape(kw.lower())
-        if re.search(pattern, normalized):
+        # Match either the English keyword or any of its Nepali aliases
+        terms = [kw] + keyword_aliases(kw)
+        if any(term_matches(t, normalized, skeleton) for t in terms):
             found.append(kw)
         else:
             missing.append(kw)
@@ -226,40 +331,46 @@ def health():
     return {"status": "ok", "service": "tracegov-ai"}
 
 
-@app.post("/analyze-document")
-async def analyze_document(
-    request: AnalyzeDocumentRequest | None = None,
-    file: UploadFile | None = File(None),
-):
-    keywords = DEFAULT_KEYWORDS
-    text = ""
-
-    if file:
-        contents = await file.read()
-        text = extract_text_from_image(contents)
-    elif request:
-        keywords = request.requiredKeywords or DEFAULT_KEYWORDS
-        if request.detectedText:
-            text = request.detectedText
-        elif request.imageBase64:
-            raw = request.imageBase64
-            if "," in raw:
-                raw = raw.split(",", 1)[1]
-            image_bytes = base64.b64decode(raw)
-            text = extract_text_from_image(image_bytes)
-        else:
-            return {"error": "Provide imageBase64, detectedText, or upload a file"}
-    else:
-        return {"error": "No input provided"}
-
+def build_analysis_response(text: str, keywords: list[str]) -> dict[str, Any]:
     result = check_keywords(text, keywords)
     classification = classify_document(text)
+    script_info = detect_script(text)
     return {
         **result,
         **classification,
+        "detectedLanguage": script_info["language"],
+        "devanagariRatio": script_info["devanagariRatio"],
         "extractedTextPreview": text[:500] if text else "",
         "keywordCount": len(keywords),
     }
+
+
+# NOTE: JSON body and multipart upload are separate endpoints. Declaring an
+# optional UploadFile alongside a Pydantic body makes FastAPI treat the whole
+# route as multipart, which silently breaks JSON clients (the Node backend).
+@app.post("/analyze-document")
+def analyze_document(request: AnalyzeDocumentRequest):
+    keywords = request.requiredKeywords or DEFAULT_KEYWORDS
+
+    if request.detectedText:
+        text = request.detectedText
+    elif request.imageBase64:
+        raw = request.imageBase64
+        if "," in raw:
+            raw = raw.split(",", 1)[1]
+        image_bytes = base64.b64decode(raw)
+        text = extract_text_from_image(image_bytes)
+    else:
+        return {"error": "Provide imageBase64 or detectedText"}
+
+    return build_analysis_response(text, keywords)
+
+
+@app.post("/analyze-document-upload")
+async def analyze_document_upload(file: UploadFile = File(...)):
+    contents = await file.read()
+    text = extract_text_from_image(contents)
+    return build_analysis_response(text, DEFAULT_KEYWORDS)
 
 
 @app.post("/estimate-completion")

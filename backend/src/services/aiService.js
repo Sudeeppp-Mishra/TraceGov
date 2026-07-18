@@ -29,10 +29,13 @@ async function callAiService(path, body, timeoutMs = 4000) {
 
 /**
  * Analyze document OCR checking for required keywords and categorizing file content.
+ * OCR on CPU (Nepali + English models) takes tens of seconds — far longer than
+ * the default 4s used for the lightweight prediction endpoints — so this call
+ * gets its own generous timeout instead.
  */
 export async function aiAnalyzeDocument({ imageBase64, requiredKeywords, detectedText }) {
   try {
-    return await callAiService('/analyze-document', { imageBase64, requiredKeywords, detectedText });
+    return await callAiService('/analyze-document', { imageBase64, requiredKeywords, detectedText }, 90000);
   } catch {
     return {
       documentType: 'Unknown',
@@ -46,7 +49,9 @@ export async function aiAnalyzeDocument({ imageBase64, requiredKeywords, detecte
       completenessScore: 0.0,
       isComplete: false,
       ocrConfidence: 0.0,
+      detectedLanguage: 'unknown',
       extractedTextPreview: '(OCR Service Unavailable)',
+      serviceUnavailable: true,
     };
   }
 }

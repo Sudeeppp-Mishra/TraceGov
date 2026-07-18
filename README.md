@@ -355,7 +355,7 @@ The Python FastAPI service (`ai-service/main.py`) exposes:
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | Service health check |
-| `POST /analyze-document` | OCR-based document analysis / keyword detection |
+| `POST /analyze-document` | OCR-based document analysis / keyword detection (English + Nepali/Devanagari) |
 | `POST /estimate-completion` | Completion time estimate using M/M/1 queueing theory |
 | `POST /predict-delay` | Delay/risk prediction for a file based on its movement history |
 | `POST /smart-backtrack` | Suggests an appropriate desk to return a file to |
@@ -363,6 +363,8 @@ The Python FastAPI service (`ai-service/main.py`) exposes:
 | `POST /bottleneck-analysis` | Standalone dwell-time bottleneck analysis (not currently called by the Node backend, which computes its own equivalent via a MongoDB aggregation) |
 
 **Resilience:** The Node backend's `aiService.js` calls this microservice over HTTP for `analyze-document`, `predict-delay`, `smart-backtrack`, and `estimate-completion`. If the AI service is unreachable, times out, or errors, `aiService.js` catches the failure and returns a locally computed fallback (heuristic risk scoring, simple keyword matching, or default completion estimates) instead of failing the request — so officer and citizen-facing features keep working even with the AI service offline.
+
+**Nepali OCR:** The EasyOCR reader is initialized with both Nepali (`ne`) and English (`en`) models, so photographed Nepali documents (नागरिकता प्रमाणपत्र, सिफारिस पत्र, लालपुर्जा, कर रसिद, …) are read directly in Devanagari. Checklist keywords entered in English are matched against a built-in table of Nepali aliases (e.g. "Citizenship" also matches "नागरिकता", "Tax Receipt" also matches "कर रसिद"), document classification scores both scripts, and the response reports the detected language mix (`detectedLanguage`: `nepali` / `english` / `mixed`). The Devanagari model (~64 MB) is downloaded automatically by EasyOCR on the first scan, so expect the very first request to be slow; officers can upload a document photo from the Register File page to run the scan.
 
 ---
 

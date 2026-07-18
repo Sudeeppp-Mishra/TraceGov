@@ -74,7 +74,7 @@ export function Button({
     secondary: 'bg-muted text-foreground hover:bg-accent hover:text-accent-foreground',
     outline: 'border border-border-strong bg-card text-foreground hover:bg-muted hover:border-muted-foreground/40',
     ghost: 'text-foreground hover:bg-muted',
-    danger: 'bg-red-600 text-white shadow-sm hover:bg-red-700',
+    danger: 'border border-transparent bg-red-600 text-white shadow-sm hover:bg-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:shadow-none dark:hover:bg-red-500/20 dark:hover:text-red-200',
   };
 
   const tagProps = Tag === 'button' ? { type, disabled: disabled || loading } : {};
@@ -354,6 +354,11 @@ let modalIdSeq = 0;
 export function Modal({ isOpen, onClose, title, description, children, className = '' }) {
   const dialogRef = useRef(null);
   const previousFocusRef = useRef(null);
+  // Keep the latest onClose in a ref so the focus-trap effect below only runs
+  // on open/close — not on every parent re-render (an inline onClose prop
+  // would otherwise re-trigger it per keystroke and steal focus mid-typing).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const idsRef = useRef(null);
   if (!idsRef.current) {
     modalIdSeq += 1;
@@ -372,14 +377,16 @@ export function Modal({ isOpen, onClose, title, description, children, className
         ? Array.from(dialogRef.current.querySelectorAll(FOCUSABLE_SELECTOR)).filter((el) => el.offsetParent !== null)
         : [];
 
-    // Move focus into the dialog as soon as it opens.
+    // Move focus into the dialog as soon as it opens — preferring the first
+    // form field over the header close button.
     const focusables = getFocusable();
-    (focusables[0] || dialogRef.current)?.focus();
+    const firstField = focusables.find((el) => ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName));
+    (firstField || focusables[0] || dialogRef.current)?.focus();
 
     const onKeyDown = (e) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose?.();
+        onCloseRef.current?.();
         return;
       }
       if (e.key === 'Tab') {
@@ -407,7 +414,7 @@ export function Modal({ isOpen, onClose, title, description, children, className
       // Restore focus to whatever triggered the dialog (e.g. the button that opened it).
       previousFocusRef.current?.focus?.();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
   return (

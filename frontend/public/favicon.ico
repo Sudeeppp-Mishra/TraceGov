@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <style>
+    .tg-bg { fill: #142845; }
+    .tg-fg { stroke: #f8fafc; }
+    @media (prefers-color-scheme: dark) {
+      .tg-bg { fill: #7f99c6; }
+      .tg-fg { stroke: #080d16; }
+    }
+  </style>
+  <rect class="tg-bg" width="24" height="24" rx="6.5" />
+  <g class="tg-fg" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" transform="translate(6,6) scale(0.5)">
+    <circle cx="6" cy="19" r="2.5" />
+    <circle cx="18" cy="5" r="2.5" />
+    <path d="M8.5 19H15a3.5 3.5 0 000-7H9a3.5 3.5 0 010-7h6.5" />
+  </g>
+</svg>

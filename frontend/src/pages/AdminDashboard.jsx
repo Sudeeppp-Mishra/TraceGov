@@ -109,13 +109,38 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleToggleDeptActive = async (id) => {
+  const handleToggleDeptActive = async (dept) => {
     try {
-      await api.toggleDepartment(id);
-      toast.success('Department status updated.');
+      await api.updateDepartment(dept.id, { isActive: !dept.isActive });
+      toast.success(`Department ${dept.isActive ? 'deactivated' : 'activated'}.`);
       await loadAdministration(currentUser.wardCode);
     } catch (err) {
       toast.error(err.message || 'Failed to toggle department status.');
+    }
+  };
+
+  // Shared delete-confirmation flow for departments and officers.
+  // `confirmTarget` = { type: 'department' | 'officer', id, name } or null.
+  const [confirmTarget, setConfirmTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleConfirmDelete = async () => {
+    if (!confirmTarget) return;
+    setDeleting(true);
+    try {
+      if (confirmTarget.type === 'department') {
+        await api.deleteDepartment(confirmTarget.id);
+        toast.success(`Department "${confirmTarget.name}" deleted.`);
+      } else {
+        await api.deleteOfficer(confirmTarget.id);
+        toast.success(`Officer "${confirmTarget.name}" removed.`);
+      }
+      setConfirmTarget(null);
+      await loadAdministration(currentUser.wardCode);
+    } catch (err) {
+      toast.error(err.message || 'Delete failed.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -293,6 +318,17 @@ export default function AdminDashboard() {
                               {stat?.backtracked > 0 && (
                                 <span className="rounded-lg bg-red-500/10 px-2 py-1 text-xs font-semibold text-red-500">{stat.backtracked} bounces</span>
                               )}
+                              {off.role !== 'admin' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmTarget({ type: 'officer', id: off._id || off.id, name: off.name })}
+                                  className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500 cursor-pointer"
+                                  aria-label={`Remove ${off.name}`}
+                                  title="Remove officer"
+                                >
+                                  <Icons.Trash className="h-4 w-4" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
@@ -384,14 +420,23 @@ export default function AdminDashboard() {
                         <dd className="mt-0.5 text-lg font-bold text-foreground">{d.files}</dd>
                       </div>
                     </dl>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-4"
-                      onClick={() => handleToggleDeptActive(d.id)}
-                    >
-                      {d.isActive ? 'Deactivate' : 'Activate'}
-                    </Button>
+                    <div className="mt-4 flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => handleToggleDeptActive(d)}
+                      >
+                        {d.isActive ? 'Deactivate' : 'Activate'}
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setConfirmTarget({ type: 'department', id: d.id, name: d.name })}
+                      >
+                        <Icons.Trash className="h-3.5 w-3.5" /> Delete
+                      </Button>
+                    </div>
                   </Card>
                 ))}
                 </div>
@@ -435,6 +480,27 @@ export default function AdminDashboard() {
             <Button type="submit" variant="primary" loading={deptFormLoading}>Create department</Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={!!confirmTarget}
+        onClose={() => setConfirmTarget(null)}
+        title={confirmTarget?.type === 'department' ? 'Delete department' : 'Remove officer'}
+        description="This action cannot be undone."
+      >
+        <div className="space-y-5">
+          <Alert tone="warning">
+            {confirmTarget?.type === 'department'
+              ? <>Permanently delete <strong>{confirmTarget?.name}</strong>? Deletion is blocked if open files or officers still reference this desk.</>
+              : <>Remove <strong>{confirmTarget?.name}</strong> from the roster? They will no longer be able to sign in. Ledger history they authored is preserved.</>}
+          </Alert>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirmTarget(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="danger" onClick={handleConfirmDelete} loading={deleting}>
+              {confirmTarget?.type === 'department' ? 'Delete department' : 'Remove officer'}
+            </Button>
+          </div>
+        </div>
       </Modal>
     </AppShell>
   );

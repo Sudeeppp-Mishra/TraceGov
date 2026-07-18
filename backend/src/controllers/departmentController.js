@@ -1,4 +1,6 @@
 import { Department } from '../models/Department.js';
+import { File } from '../models/File.js';
+import { User } from '../models/User.js';
 
 /**
  * Retrieve all departments.
@@ -104,8 +106,9 @@ export async function updateDepartment(req, res, next) {
 }
 
 /**
- * Toggle active status / delete department (Admin only).
- * Performs soft deactivation to preserve ledger data integrity.
+ * Permanently delete a department (Admin only).
+ * Guarded: refuses when open files are currently at this desk or officers are
+ * still assigned to it, so ledger locations always resolve to a known desk.
  */
 export async function deleteDepartment(req, res, next) {
   try {
@@ -117,15 +120,27 @@ export async function deleteDepartment(req, res, next) {
       return res.status(404).json({ success: false, error: 'Department not found' });
     }
 
-    // Toggle active state as a soft-delete mechanism
-    department.isActive = !department.isActive;
-    await department.save();
+    const [openFiles, assignedOfficers] = await Promise.all([
+      File.countDocuments({ wardCode, currentLocation: department.name, isClosed: false }),
+      User.countDocuments({ wardCode, deskLocation: department.name, isActive: true }),
+    ]);
 
-    return res.json({
-      success: true,
-      message: `Department successfully ${department.isActive ? 'activated' : 'deactivated'}`,
-      department,
-    });
+    if (openFiles > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Cannot delete: ${openFiles} open file(s) are currently at this desk. Forward them first.`,
+      });
+    }
+    if (assignedOfficers > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Cannot delete: ${assignedOfficers} officer(s) are assigned to this desk. Reassign them first.`,
+      });
+    }
+
+    await Department.deleteOne({ _id: id, wardCode });
+
+    return res.json({ success: true, message: 'Department deleted' });
   } catch (err) {
     next(err);
   }

@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User, ROLES } from '../models/User.js';
+import { MovementHistory } from '../models/MovementHistory.js';
 
 /**
  * Register a new Officer/Admin account.
@@ -107,6 +108,43 @@ export async function getOfficers(req, res, next) {
       .select('name email role wardCode deskLocation')
       .lean();
     return res.json(officers);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Remove an officer account (Admin only).
+ * Officers referenced by the immutable movement ledger are deactivated instead
+ * of hard-deleted so audit history keeps resolving their names; accounts with
+ * no ledger entries are removed outright. Either way they leave the roster and
+ * can no longer sign in.
+ */
+export async function deleteOfficer(req, res, next) {
+  try {
+    const { id } = req.params;
+
+    if (String(req.user._id) === String(id)) {
+      return res.status(400).json({ success: false, error: 'You cannot remove your own account.' });
+    }
+
+    const officer = await User.findOne({ _id: id, wardCode: req.user.wardCode });
+    if (!officer) {
+      return res.status(404).json({ success: false, error: 'Officer not found' });
+    }
+    if (officer.role === ROLES.ADMIN) {
+      return res.status(400).json({ success: false, error: 'Administrator accounts cannot be removed here.' });
+    }
+
+    const ledgerEntries = await MovementHistory.countDocuments({ officerId: officer._id });
+    if (ledgerEntries > 0) {
+      officer.isActive = false;
+      await officer.save();
+    } else {
+      await User.deleteOne({ _id: officer._id });
+    }
+
+    return res.json({ success: true, message: 'Officer removed' });
   } catch (err) {
     next(err);
   }

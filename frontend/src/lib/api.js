@@ -61,6 +61,11 @@ export const api = {
 
   getOfficers: () => request('/auth/officers'),
 
+  deleteOfficer: (id) =>
+    request(`/auth/officers/${id}`, {
+      method: 'DELETE',
+    }),
+
   // --- Files API ---
   registerFile: (payload) =>
     request('/files/register', {
@@ -113,8 +118,8 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Despite the DELETE verb, the backend toggles the department's active flag.
-  toggleDepartment: (id) =>
+  // Permanently removes a department (backend refuses if files/officers still reference it).
+  deleteDepartment: (id) =>
     request(`/departments/${id}`, {
       method: 'DELETE',
     }),

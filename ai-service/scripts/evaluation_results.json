@@ -1,0 +1,129 @@
+{
+  "ocr": {
+    "documents_tested": 7,
+    "keyword_precision": 1.0,
+    "keyword_recall": 1.0,
+    "document_type_accuracy": 1.0,
+    "avg_latency_ms": 2074.7,
+    "rows": [
+      {
+        "name": "certificate_sample",
+        "expected_keywords": [
+          "Certificate"
+        ],
+        "found_keywords": [
+          "Certificate"
+        ],
+        "expected_type": "Certificate",
+        "detected_type": "Certificate",
+        "type_correct": true,
+        "latency_ms": 1988.4
+      },
+      {
+        "name": "tax_receipt_sample",
+        "expected_keywords": [
+          "Tax Receipt"
+        ],
+        "found_keywords": [
+          "Tax Receipt"
+        ],
+        "expected_type": "Tax Receipt",
+        "detected_type": "Tax Receipt",
+        "type_correct": true,
+        "latency_ms": 1973.9
+      },
+      {
+        "name": "citizenship_sample",
+        "expected_keywords": [
+          "Certificate",
+          "Citizenship"
+        ],
+        "found_keywords": [
+          "Certificate",
+          "Citizenship"
+        ],
+        "expected_type": "Citizenship",
+        "detected_type": "Citizenship",
+        "type_correct": true,
+        "latency_ms": 2117.0
+      },
+      {
+        "name": "recommendation_letter_sample",
+        "expected_keywords": [
+          "Recommendation Letter"
+        ],
+        "found_keywords": [
+          "Recommendation Letter"
+        ],
+        "expected_type": "Recommendation Letter",
+        "detected_type": "Recommendation Letter",
+        "type_correct": true,
+        "latency_ms": 2253.5
+      },
+      {
+        "name": "land_document_sample",
+        "expected_keywords": [
+          "Certificate"
+        ],
+        "found_keywords": [
+          "Certificate"
+        ],
+        "expected_type": "Land Document",
+        "detected_type": "Land Document",
+        "type_correct": true,
+        "latency_ms": 2210.5
+      },
+      {
+        "name": "ward_form_sample",
+        "expected_keywords": [
+          "Application Form"
+        ],
+        "found_keywords": [
+          "Application Form"
+        ],
+        "expected_type": "Ward Form",
+        "detected_type": "Ward Form",
+        "type_correct": true,
+        "latency_ms": 1855.5
+      },
+      {
+        "name": "noise_sample",
+        "expected_keywords": [],
+        "found_keywords": [],
+        "expected_type": "Unknown",
+        "detected_type": "Unknown",
+        "type_correct": true,
+        "latency_ms": 2124.0
+      }
+    ]
+  },
+  "queueing_and_risk": [
+    {
+      "scenario": "Freshly registered file (1 movement)",
+      "sample_size": 1,
+      "estimated_minutes_remaining": 480,
+      "estimate_confidence": "low",
+      "delay_probability": 14,
+      "expected_processing_hours": 5,
+      "latency_ms": 17.6
+    },
+    {
+      "scenario": "Mid-workflow file (3 movements)",
+      "sample_size": 3,
+      "estimated_minutes_remaining": 17280,
+      "estimate_confidence": "medium",
+      "delay_probability": 56,
+      "expected_processing_hours": 12,
+      "latency_ms": 2.5
+    },
+    {
+      "scenario": "Long-running / backtracked file (5+ movements)",
+      "sample_size": 5,
+      "estimated_minutes_remaining": 15840,
+      "estimate_confidence": "medium",
+      "delay_probability": 70,
+      "expected_processing_hours": 18,
+      "latency_ms": 2.0
+    }
+  ]
+}

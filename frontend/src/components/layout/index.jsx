@@ -42,6 +42,7 @@ const OFFICER_NAV = [
   { to: '/officer', label: 'Workspace', icon: Icons.Layers },
   { to: '/inbox', label: 'Inbox', icon: Icons.Inbox },
   { to: '/register-file', label: 'Register File', icon: Icons.FileText },
+  { to: '/activity', label: 'Activity', icon: Icons.Clock },
   { to: '/ai', label: 'AI Insights', icon: Icons.Sparkles },
 ];
 

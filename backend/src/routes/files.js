@@ -7,6 +7,7 @@ import {
   backtrackFile,
   searchFiles,
   getOfficerInbox,
+  getActivityLog,
 } from '../controllers/fileController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { validateRegisterFile, validateForward, validateBacktrack } from '../middleware/validation.js';
@@ -20,6 +21,9 @@ router.use(authenticate, authorize('officer', 'admin'));
 router.get('/inbox', getOfficerInbox);
 router.post('/register', validateRegisterFile, registerFile);
 router.get('/search', searchFiles);
+
+// Movement-ledger activity feed (officers: own actions; admins: whole ward)
+router.get('/activity', getActivityLog);
 
 // Summary & QR scan lookup endpoints
 router.get('/dashboard/summary', getDashboardSummary);

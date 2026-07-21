@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import { File, FILE_STATUSES } from '../models/File.js';
 import { MovementHistory } from '../models/MovementHistory.js';
+import { Department } from '../models/Department.js';
+import { User } from '../models/User.js';
 import { generateFileUid, generateTrackingId } from '../services/cryptoService.js';
 import { generateQrCode, parseQrPayload } from '../services/qrService.js';
 import { appendMovementLog, verifyLogChain } from '../services/ledgerService.js';
@@ -391,6 +393,9 @@ async function runTransactionalWrite(operationsFn) {
 
 /**
  * Forward a file to another desk or location.
+ * Dispatching without an explicit target routes the file to the ward's
+ * archives desk (where closed physical files are stored); other final
+ * statuses close the file at its current desk.
  */
 export async function forwardFile(req, res, next) {
   try {
@@ -407,9 +412,26 @@ export async function forwardFile(req, res, next) {
       if (!file) {
         throw new Error('File not found');
       }
+      if (file.isClosed) {
+        throw new Error('File closed');
+      }
 
       const previousLocation = file.currentLocation;
-      const targetLocation = nextLocation || file.currentLocation;
+      let targetLocation = nextLocation || file.currentLocation;
+
+      // Dispatched files are physically moved to long-term storage: when no
+      // target desk was chosen, default to the ward's archives desk.
+      if (nextStatus === FILE_STATUSES.DISPATCHED && !nextLocation) {
+        const archiveDesk = await Department.findOne({
+          wardCode: file.wardCode,
+          isActive: true,
+          name: /archive/i,
+        })
+          .session(session)
+          .lean();
+        if (archiveDesk) targetLocation = archiveDesk.name;
+      }
+
       file.currentLocation = targetLocation;
       file.currentStatus = nextStatus;
       if (isFinalStatus) {
@@ -451,6 +473,9 @@ export async function forwardFile(req, res, next) {
     if (err.message === 'File not found') {
       return res.status(404).json({ error: 'File not found' });
     }
+    if (err.message === 'File closed') {
+      return res.status(400).json({ error: 'This file is already closed. Closed files cannot be forwarded.' });
+    }
     next(err);
   }
 }
@@ -470,6 +495,9 @@ export async function backtrackFile(req, res, next) {
       const file = await File.findById(req.params.id).session(session);
       if (!file) {
         throw new Error('File not found');
+      }
+      if (file.isClosed) {
+        throw new Error('File closed');
       }
 
       const previousLocation = file.currentLocation;
@@ -511,6 +539,9 @@ export async function backtrackFile(req, res, next) {
   } catch (err) {
     if (err.message === 'File not found') {
       return res.status(404).json({ error: 'File not found' });
+    }
+    if (err.message === 'File closed') {
+      return res.status(400).json({ error: 'This file is already closed. Closed files cannot be backtracked.' });
     }
     next(err);
   }
@@ -578,6 +609,83 @@ export async function getOfficerInbox(req, res, next) {
       success: true,
       files,
       count: files.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Paginated movement-ledger activity feed.
+ * - Officers see only the movements they performed themselves (their audit trail).
+ * - Admins see every movement in their ward, and can narrow to a single
+ *   officer via ?officerId= (e.g. to review one officer's work).
+ * Optional filters: ?action=<status>, ?from=<ISO date>, ?to=<ISO date>.
+ * Pagination: ?page= (1-based) and ?limit= (max 100).
+ */
+export async function getActivityLog(req, res, next) {
+  try {
+    const { officerId, action, from, to } = req.query;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(Math.max(1, Number(req.query.limit) || 25), 100);
+    const isAdmin = req.user.role === 'admin';
+
+    const filter = {};
+
+    if (!isAdmin) {
+      // Officers may only audit their own actions
+      filter.officerId = req.user._id;
+    } else if (officerId) {
+      if (!mongoose.Types.ObjectId.isValid(officerId)) {
+        return res.status(400).json({ success: false, error: 'Invalid officerId filter' });
+      }
+      // Admins can filter to one officer, but only within their own ward
+      const target = await User.findOne({ _id: officerId, wardCode: req.user.wardCode }).select('_id').lean();
+      if (!target) {
+        return res.status(404).json({ success: false, error: 'Officer not found in your ward' });
+      }
+      filter.officerId = officerId;
+    }
+
+    if (action && Object.values(FILE_STATUSES).includes(action)) {
+      filter.actionType = action;
+    }
+
+    if (from || to) {
+      filter.timestamp = {};
+      if (from && !Number.isNaN(Date.parse(from))) filter.timestamp.$gte = new Date(from);
+      if (to && !Number.isNaN(Date.parse(to))) filter.timestamp.$lte = new Date(to);
+      if (Object.keys(filter.timestamp).length === 0) delete filter.timestamp;
+    }
+
+    // Ward isolation: MovementHistory has no wardCode, so scope through the
+    // ward's file ids (same pattern as the dashboard summary). Officers are
+    // already scoped by officerId but stay ward-bounded too in case they
+    // acted in another ward before a transfer.
+    const wardFileIds = await File.find({ wardCode: req.user.wardCode }).distinct('_id');
+    filter.fileId = { $in: wardFileIds };
+
+    const [total, movements] = await Promise.all([
+      MovementHistory.countDocuments(filter),
+      MovementHistory.find(filter)
+        .sort({ timestamp: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('fileId', 'fileUid trackingId title citizenName documentType currentStatus')
+        .populate('officerId', 'name deskLocation role')
+        .select('fileId officerId actionType currentLocation previousLocation timestamp notes backtrackReason')
+        .lean(),
+    ]);
+
+    return res.json({
+      success: true,
+      movements,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
     });
   } catch (err) {
     next(err);

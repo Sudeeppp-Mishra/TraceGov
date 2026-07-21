@@ -12,6 +12,7 @@ const OfficerInbox = lazy(() => import('./pages/OfficerInbox'));
 const RegisterFilePage = lazy(() => import('./pages/RegisterFilePage'));
 const AIInsightsDashboard = lazy(() => import('./pages/AIInsightsDashboard'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const ActivityLogPage = lazy(() => import('./pages/ActivityLogPage'));
 
 /** Access guard restricting nested pages to authorized sessions. */
 function ProtectedRoute({ children, roles }) {
@@ -19,6 +20,11 @@ function ProtectedRoute({ children, roles }) {
   if (!user) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/officer" replace />;
   return children;
+}
+
+/** Unknown URLs: staff go back to their workspace, visitors to the landing page. */
+function CatchAllRedirect() {
+  return <Navigate to={getStoredUser() ? '/officer' : '/'} replace />;
 }
 
 export default function App() {
@@ -71,6 +77,14 @@ export default function App() {
           }
         />
         <Route
+          path="/activity"
+          element={
+            <ProtectedRoute roles={['officer', 'admin']}>
+              <ActivityLogPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/admin"
           element={
             <ProtectedRoute roles={['admin']}>
@@ -79,7 +93,7 @@ export default function App() {
           }
         />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<CatchAllRedirect />} />
       </Routes>
     </Suspense>
   );

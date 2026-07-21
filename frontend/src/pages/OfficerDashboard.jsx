@@ -106,7 +106,8 @@ export default function OfficerDashboard() {
       setNextLocation(''); setBacktrackLocation(''); setRoutingNotes('');
       setNextStatus('Pending');
       setBacktrackReason(''); setInternalNotes(''); setAiDelayReport(null); setAiBacktrackSuggest(null);
-      setActionTab('forward');
+      // Closed files only expose the AI/history view — no routing tabs.
+      setActionTab(['Dispatched', 'Approved', 'Rejected'].includes(data.file.currentStatus) ? 'ai' : 'forward');
       setSearchQuery(''); setSearchResults([]); setActiveResultIndex(-1);
     } catch (err) {
       toast.error(err.message || 'Error loading file.');
@@ -215,11 +216,20 @@ export default function OfficerDashboard() {
     }
   };
 
-  const tabs = useMemo(() => ([
-    { id: 'forward', label: 'Forward', icon: Icons.ArrowRight },
-    { id: 'backtrack', label: 'Backtrack', icon: Icons.ArrowLeft },
-    { id: 'ai', label: 'AI Check', icon: Icons.Sparkles },
-  ]), []);
+  // Closed files (dispatched, approved, rejected) are archived — no further
+  // routing actions are allowed on them, only the AI/history views.
+  const CLOSED_STATUSES = ['Dispatched', 'Approved', 'Rejected'];
+  const isFileClosed = selectedFile && CLOSED_STATUSES.includes(selectedFile.currentStatus);
+
+  const tabs = useMemo(() => (
+    isFileClosed
+      ? [{ id: 'ai', label: 'AI Check', icon: Icons.Sparkles }]
+      : [
+          { id: 'forward', label: 'Forward', icon: Icons.ArrowRight },
+          { id: 'backtrack', label: 'Backtrack', icon: Icons.ArrowLeft },
+          { id: 'ai', label: 'AI Check', icon: Icons.Sparkles },
+        ]
+  ), [isFileClosed]);
 
   return (
     <AppShell user={currentUser}>
@@ -318,6 +328,16 @@ export default function OfficerDashboard() {
                     <Badge status={selectedFile.currentStatus} />
                   </div>
 
+                  {isFileClosed && (
+                    <div className="mt-5 flex items-center gap-2.5 rounded-xl border border-border bg-muted/40 p-3.5 text-sm text-muted-foreground">
+                      <Icons.Lock className="h-4 w-4 shrink-0" />
+                      <span>
+                        This file is <strong className="text-foreground">{selectedFile.currentStatus.toLowerCase()}</strong> and closed
+                        {selectedFile.currentStatus === 'Dispatched' ? ` — stored at ${selectedFile.currentLocation}.` : '.'} No further routing is possible.
+                      </span>
+                    </div>
+                  )}
+
                   <Tabs
                     className="mt-5"
                     tabs={tabs}
@@ -337,7 +357,11 @@ export default function OfficerDashboard() {
                           </Select>
                           <Select
                             label="Update file status" id="f_status" value={nextStatus} onChange={(e) => setNextStatus(e.target.value)} required
-                            hint={['Approved', 'Dispatched'].includes(nextStatus) ? 'Final status — target desk is optional.' : undefined}
+                            hint={nextStatus === 'Dispatched'
+                              ? 'Final status — if no desk is chosen, the file is moved to the archives desk and closed.'
+                              : nextStatus === 'Approved'
+                                ? 'Final status — target desk is optional; the file closes at its current desk.'
+                                : undefined}
                           >
                             <option value="Pending">Pending (Under routing)</option>
                             <option value="Under Review">Under Review (Details verification)</option>

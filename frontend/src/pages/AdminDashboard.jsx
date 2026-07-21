@@ -220,6 +220,9 @@ export default function AdminDashboard() {
           description="Manage ward officers, monitor throughput, and verify cryptographic ledger integrity."
           actions={
             <>
+              <Button variant="outline" onClick={() => navigate('/activity')}>
+                <Icons.Clock className="h-4 w-4" /> Full activity log
+              </Button>
               <Button variant="outline" onClick={runSecurityAudit} loading={auditing}>
                 <Icons.ShieldCheck className="h-4 w-4" /> Run ledger audit
               </Button>

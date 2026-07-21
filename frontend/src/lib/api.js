@@ -103,6 +103,12 @@ export const api = {
     return request(`/files/inbox${qs ? `?${qs}` : ''}`);
   },
 
+  // Paginated movement-ledger activity (officers: own actions; admins: whole ward)
+  getActivity: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/files/activity${qs ? `?${qs}` : ''}`);
+  },
+
   // --- Departments API ---
   getDepartments: () => request('/departments'),
 

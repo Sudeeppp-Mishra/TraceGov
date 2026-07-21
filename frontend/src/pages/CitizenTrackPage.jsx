@@ -3,9 +3,24 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import {
   Container, Card, Button, Input, Badge, Icons, Skeleton, EmptyState, SectionLabel,
-  Timeline, TimelineItem,
+  Timeline, TimelineItem, Modal, Spinner,
 } from '../components/ui';
 import { Logo, ThemeToggle } from '../components/layout';
+
+// The QR tag on a file receipt encodes a JSON payload ({ uid, ward/office, ts }).
+// The public track endpoint accepts a file UID as well as a tracking ID, so a
+// scanned payload just needs its uid extracted; plain text scans pass through.
+function parseScannedCode(rawText) {
+  if (!rawText) return '';
+  const trimmed = rawText.trim();
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && parsed.uid) return String(parsed.uid).trim();
+  } catch {
+    // Not JSON — treat as a raw tracking ID / file UID
+  }
+  return trimmed;
+}
 
 // The citizen-facing rail groups the nine backend statuses into four stages.
 const STEPS = ['Received', 'In processing', 'Decision', 'Dispatched'];
@@ -231,6 +246,12 @@ export default function CitizenTrackPage() {
 
   const [autoRefresh, setAutoRefresh] = useState(false);
 
+  // QR scanner (html5-qrcode camera view inside a modal)
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scannerInitializing, setScannerInitializing] = useState(false);
+  const [scannerError, setScannerError] = useState('');
+  const qrScannerRef = useRef(null);
+
   const saveSearchHistory = useCallback((id, title) => {
     setPreviousSearches((prev) => {
       const filtered = prev.filter((x) => x.id !== id);
@@ -272,6 +293,55 @@ export default function CitizenTrackPage() {
     setTrackingId(id);
     runTrack(id);
   };
+
+  const stopCameraScanner = useCallback(() => {
+    setIsScannerOpen(false);
+    setScannerInitializing(false);
+    if (qrScannerRef.current) {
+      qrScannerRef.current.stop().then(() => { qrScannerRef.current = null; }).catch(() => {});
+    }
+  }, []);
+
+  const startCameraScanner = () => {
+    setIsScannerOpen(true);
+    setScannerError('');
+    setScannerInitializing(true);
+    // Wait for the modal (and its container div) to mount before attaching the
+    // camera. html5-qrcode (~380 kB) is loaded on demand so citizens who type
+    // their ID never download it.
+    setTimeout(async () => {
+      let Html5Qrcode;
+      try {
+        ({ Html5Qrcode } = await import('html5-qrcode'));
+      } catch {
+        setScannerInitializing(false);
+        setScannerError('Could not load the scanner. Please check your connection, or type the tracking ID instead.');
+        return;
+      }
+      const html5QrCode = new Html5Qrcode('citizen-qr-reader');
+      qrScannerRef.current = html5QrCode;
+      html5QrCode.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        (decodedText) => {
+          stopCameraScanner();
+          const id = parseScannedCode(decodedText);
+          setTrackingId(id);
+          runTrack(id);
+        },
+        () => {}
+      ).then(() => setScannerInitializing(false))
+        .catch(() => {
+          setScannerInitializing(false);
+          setScannerError('Could not access the camera. Please allow camera permission in your browser, or type the tracking ID instead.');
+        });
+    }, 300);
+  };
+
+  // Stop the camera if the page unmounts while scanning
+  useEffect(() => () => {
+    if (qrScannerRef.current) qrScannerRef.current.stop().catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!autoRefresh || !fileDetails || fileDetails.currentStatus === 'Dispatched') return undefined;
@@ -324,6 +394,14 @@ export default function CitizenTrackPage() {
                   {loading ? 'Searching...' : <>Track file <Icons.ArrowRight className="h-4 w-4" /></>}
                 </Button>
               </form>
+              <div className="mt-3 flex items-center gap-3">
+                <span className="h-px flex-1 bg-border" />
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">or</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <Button variant="outline" size="md" className="mt-3 w-full" onClick={startCameraScanner} disabled={loading}>
+                <Icons.QrCode className="h-4 w-4" /> Scan the QR code on your receipt
+              </Button>
             </Card>
           </Container>
         </section>
@@ -369,7 +447,7 @@ export default function CitizenTrackPage() {
 
               <div className="grid gap-4 sm:grid-cols-3">
                 {[
-                  { icon: Icons.QrCode, t: 'Find your ID', d: 'It is printed on your file receipt, starting with TG.' },
+                  { icon: Icons.QrCode, t: 'Scan or type your ID', d: 'Scan the QR on your receipt with your camera, or type the ID starting with TG.' },
                   { icon: Icons.Route, t: 'See live movement', d: 'Follow the file across desks without visiting repeatedly.' },
                   { icon: Icons.Clock, t: 'Know what to expect', d: 'See the current desk, next step, and expected progress.' },
                 ].map((x) => (
@@ -425,6 +503,28 @@ export default function CitizenTrackPage() {
           )}
         </Container>
       </main>
+
+      <Modal
+        isOpen={isScannerOpen}
+        onClose={stopCameraScanner}
+        title="Scan your QR code"
+        description="Point your camera at the QR code printed on your file receipt."
+      >
+        <div className="space-y-3">
+          <div id="citizen-qr-reader" className="overflow-hidden rounded-xl border border-border bg-black [&_video]:!w-full" />
+          {scannerInitializing && (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+              <Spinner className="h-4 w-4" /> Starting camera…
+            </div>
+          )}
+          {scannerError && (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs font-medium text-amber-600">{scannerError}</p>
+          )}
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={stopCameraScanner}>Cancel</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

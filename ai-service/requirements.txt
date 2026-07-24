@@ -2,8 +2,8 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 easyocr==1.7.2
-numpy==2.2.1
-scikit-learn==1.6.0
+numpy==1.26.4
+scikit-learn==1.5.2
 pydantic==2.10.4
-Pillow==11.1.0
+Pillow==10.4.0
 certifi>=2024.12.14

@@ -26,12 +26,19 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from PIL import Image
-
+     
 app = FastAPI(
     title="TraceGov AI Service",
     description="OCR document checks and queueing-based completion estimates",
     version="0.1.0",
 )
+
+@app.get("/")
+def health():
+    return {
+        "service": "TraceGov AI Service",
+        "status": "running"
+    }
 
 app.add_middleware(
     CORSMiddleware,

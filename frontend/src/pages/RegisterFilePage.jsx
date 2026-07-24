@@ -51,6 +51,23 @@ export default function RegisterFilePage() {
   };
   const removeChecklistItem = (item) => setRequiredDocs((d) => d.filter((x) => x !== item));
 
+  const runScan = async (dataUrl) => {
+    setScanError('');
+    setScanResult(null);
+    setScanning(true);
+    try {
+      const result = await api.analyzeDocument({
+        imageBase64: dataUrl,
+        requiredKeywords: requiredDocs.length > 0 ? requiredDocs : undefined,
+      });
+      setScanResult(result);
+    } catch (err) {
+      setScanError(err.message || 'Document scan failed.');
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const handleScanFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -58,8 +75,6 @@ export default function RegisterFilePage() {
       setScanError('Please choose an image file (photo or scan of the document).');
       return;
     }
-    setScanError('');
-    setScanResult(null);
 
     // Read as base64 data URL for the AI service
     const dataUrl = await new Promise((resolve, reject) => {
@@ -69,23 +84,8 @@ export default function RegisterFilePage() {
       reader.readAsDataURL(file);
     });
     setScanPreview(dataUrl);
-
-    setScanning(true);
-    try {
-      const result = await api.analyzeDocument({
-        imageBase64: dataUrl,
-        requiredKeywords: requiredDocs.length > 0 ? requiredDocs : undefined,
-      });
-      setScanResult(result);
-      if (result.serviceUnavailable) {
-        setScanError('OCR service is offline — checklist verification was skipped.');
-      }
-    } catch (err) {
-      setScanError(err.message || 'Document scan failed.');
-    } finally {
-      setScanning(false);
-      e.target.value = ''; // allow rescanning the same file
-    }
+    e.target.value = ''; // allow rescanning the same file
+    await runScan(dataUrl);
   };
 
   const clearScan = () => {
@@ -218,6 +218,17 @@ export default function RegisterFilePage() {
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                               <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                               Reading document… Nepali OCR can take up to a minute on first run.
+                            </div>
+                          ) : scanResult?.serviceUnavailable ? (
+                            <div className="space-y-2">
+                              <p className="text-sm font-semibold text-amber-600">Scan could not run — the AI service is offline.</p>
+                              <p className="text-xs text-muted-foreground">
+                                No checklist items were checked. Start the AI service (<span className="font-mono">npm run dev:ai</span>) and retry,
+                                or continue registering the file without a scan.
+                              </p>
+                              <Button variant="outline" size="sm" onClick={() => runScan(scanPreview)}>
+                                <Icons.Zap className="h-3.5 w-3.5" /> Retry scan
+                              </Button>
                             </div>
                           ) : scanResult ? (
                             <div className="space-y-2">

@@ -135,7 +135,7 @@ export function validateLogin(req, res, next) {
  * Validates physical file registration.
  */
 export function validateRegisterFile(req, res, next) {
-  const { title, citizenName, citizenPhone, documentType, requiredDocuments } = req.body;
+  const { title, citizenName, citizenPhone, citizenEmail, documentType, requiredDocuments } = req.body;
   const errors = [];
 
   if (!title || typeof title !== 'string' || !title.trim()) {
@@ -152,6 +152,13 @@ export function validateRegisterFile(req, res, next) {
     errors.push({ field: 'citizenPhone', message: 'Citizen phone number is required' });
   } else if (!/^\d{10}$/.test(citizenPhone.trim())) {
     errors.push({ field: 'citizenPhone', message: 'Citizen phone number must be exactly 10 digits' });
+  }
+
+  if (citizenEmail && typeof citizenEmail === 'string' && citizenEmail.trim()) {
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(citizenEmail.trim())) {
+      errors.push({ field: 'citizenEmail', message: 'Please provide a valid email address' });
+    }
   }
 
   if (!documentType || typeof documentType !== 'string' || !documentType.trim()) {

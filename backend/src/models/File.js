@@ -45,6 +45,12 @@ const fileSchema = new mongoose.Schema(
       trim: true,
       match: [/^\d{10}$/, 'Phone number must be exactly 10 digits'],
     },
+    citizenEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email address'],
+    },
     documentType: {
       type: String,
       required: [true, 'Document type is required'],

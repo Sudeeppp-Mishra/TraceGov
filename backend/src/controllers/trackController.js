@@ -61,12 +61,24 @@ export async function trackFile(req, res, next) {
       ? `${rawPhone.slice(0, 2)}****${rawPhone.slice(-4)}`
       : rawPhone;
 
+    // Mask email for citizen privacy (e.g. sudeep@gmail.com -> s***p@gmail.com)
+    let maskedEmail = null;
+    if (file.citizenEmail) {
+      const [namePart, domainPart] = file.citizenEmail.split('@');
+      if (namePart.length > 2) {
+        maskedEmail = `${namePart[0]}***${namePart[namePart.length - 1]}@${domainPart}`;
+      } else {
+        maskedEmail = `${namePart[0]}***@${domainPart}`;
+      }
+    }
+
     return res.json({
       trackingId: file.trackingId,
       fileUid: file.fileUid,
       title: file.title,
       citizenName: file.citizenName,
       citizenPhoneMasked: maskedPhone,
+      citizenEmailMasked: maskedEmail,
       documentType: file.documentType,
       currentStatus: file.currentStatus,
       currentLocation: file.currentLocation,
@@ -75,6 +87,7 @@ export async function trackFile(req, res, next) {
       lastUpdated: file.updatedAt,
       smsNotificationsActive: true,
       smsNotificationsSent: smsCount,
+      emailNotificationsActive: Boolean(file.citizenEmail),
       timeline: citizenTimeline,
     });
   } catch (err) {

@@ -23,6 +23,7 @@ export default function RegisterFilePage() {
   const [title, setTitle] = useState('');
   const [citizenName, setCitizenName] = useState('');
   const [citizenPhone, setCitizenPhone] = useState('');
+  const [citizenEmail, setCitizenEmail] = useState('');
   const [documentType, setDocumentType] = useState('Recommendation Letter');
   const [internalNotes, setInternalNotes] = useState('');
   const [requiredDocs, setRequiredDocs] = useState([]);
@@ -110,8 +111,13 @@ export default function RegisterFilePage() {
     setError('');
     try {
       const res = await api.registerFile({
-        title: title.trim(), citizenName: citizenName.trim(), citizenPhone: citizenPhone.trim(),
-        documentType, requiredDocuments: requiredDocs, internalNotes: internalNotes.trim(),
+        title: title.trim(),
+        citizenName: citizenName.trim(),
+        citizenPhone: citizenPhone.trim(),
+        citizenEmail: citizenEmail.trim() || undefined,
+        documentType,
+        requiredDocuments: requiredDocs,
+        internalNotes: internalNotes.trim(),
       });
       setReceipt(res);
       toast.success('File registered successfully.');
@@ -123,7 +129,7 @@ export default function RegisterFilePage() {
   };
 
   const resetForm = () => {
-    setTitle(''); setCitizenName(''); setCitizenPhone(''); setDocumentType('Recommendation Letter');
+    setTitle(''); setCitizenName(''); setCitizenPhone(''); setCitizenEmail(''); setDocumentType('Recommendation Letter');
     setInternalNotes(''); setRequiredDocs([]); setReceipt(null); setError('');
     clearScan();
   };
@@ -157,7 +163,10 @@ export default function RegisterFilePage() {
                   <Input label="Mobile (10 digits)" id="phone" placeholder="9841234567" value={citizenPhone} onChange={(e) => setCitizenPhone(e.target.value)} required disabled={loading} inputMode="numeric" maxLength={10} />
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
+                  <Input label="Citizen Email Address (optional for live email alerts)" id="email" type="email" placeholder="e.g. aarav@gmail.com" value={citizenEmail} onChange={(e) => setCitizenEmail(e.target.value)} disabled={loading} />
                   <Input label="File title" id="title" placeholder="e.g. Property Registration" value={title} onChange={(e) => setTitle(e.target.value)} required disabled={loading} />
+                </div>
+                <div>
                   <Select label="Document category" id="type" value={documentType} onChange={(e) => setDocumentType(e.target.value)} required disabled={loading}>
                     {DOCUMENT_TYPES.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                   </Select>
@@ -300,11 +309,11 @@ export default function RegisterFilePage() {
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">Tracking ID</span><span className="mt-0.5 font-mono font-bold text-foreground">{file?.trackingId}</span></div>
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">Citizen</span><span className="mt-0.5 font-bold text-foreground">{citizenName}</span></div>
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">Phone (SMS)</span><span className="mt-0.5 font-mono font-bold text-foreground">+977-{citizenPhone}</span></div>
+                <div><span className="block text-xs font-bold uppercase text-muted-foreground">Email Alert</span><span className="mt-0.5 font-bold text-foreground">{citizenEmail ? <span className="text-emerald-600 font-mono">✓ {citizenEmail}</span> : <span className="text-muted-foreground italic">Not provided</span>}</span></div>
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">Initial desk</span><span className="mt-0.5 font-bold text-foreground">{file?.currentLocation}</span></div>
-                <div><span className="block text-xs font-bold uppercase text-muted-foreground">SMS Alert Status</span><span className="mt-0.5 flex items-center gap-1 font-bold text-emerald-600"><span>✓ Sent</span></span></div>
               </div>
               <p className="mt-4 rounded-lg bg-emerald-500/10 p-2 text-center text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                📲 SMS notification sent to <strong>+977-{citizenPhone}</strong>. The citizen will receive automated SMS alerts whenever file status changes.
+                📲 {citizenEmail ? `Email & SMS alerts dispatched to ${citizenEmail}. The citizen will receive automated notifications on status changes.` : `SMS notification logged for +977-${citizenPhone}. Citizen will receive updates.`}
               </p>
               <p className="mt-4 text-center text-xs italic leading-relaxed text-muted-foreground">
                 Track status anytime by scanning this QR or visiting<br /><strong>{window.location.origin}/track</strong>

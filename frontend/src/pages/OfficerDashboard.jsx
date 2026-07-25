@@ -167,8 +167,9 @@ export default function OfficerDashboard() {
     setActionLoading(true);
     try {
       const res = await api.forwardFile(selectedFile.id, { nextLocation, nextStatus, notes: routingNotes.trim() });
-      const smsMsg = res?.smsNotified ? ' 📱 SMS alert sent to citizen.' : '';
-      toast.success(`File routed with "${nextStatus}" status.${smsMsg}`);
+      const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
+      const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
+      toast.success(`File routed with "${nextStatus}" status.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid);
     } catch (err) {
@@ -184,8 +185,9 @@ export default function OfficerDashboard() {
       const res = await api.backtrackFile(selectedFile.id, {
         returnLocation: backtrackLocation, backtrackReason: backtrackReason.trim(), internalNotes: internalNotes.trim(),
       });
-      const smsMsg = res?.smsNotified ? ' 📱 SMS alert sent to citizen.' : '';
-      toast.success(`File returned to ${backtrackLocation}.${smsMsg}`);
+      const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
+      const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
+      toast.success(`File returned to ${backtrackLocation}.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid);
     } catch (err) {

@@ -8,6 +8,7 @@ import { generateFileUid, generateTrackingId } from '../services/cryptoService.j
 import { generateQrCode, parseQrPayload } from '../services/qrService.js';
 import { appendMovementLog, verifyLogChain } from '../services/ledgerService.js';
 import { sendSmsNotification } from '../services/smsService.js';
+import { sendEmailNotification } from '../services/emailService.js';
 
 // Helper: Calculate processing time differences in minutes
 function minutesBetween(a, b) {
@@ -38,6 +39,7 @@ export async function registerFile(req, res, next) {
       title,
       citizenName,
       citizenPhone,
+      citizenEmail,
       documentType,
       requiredDocuments = [],
       internalNotes,
@@ -88,6 +90,7 @@ export async function registerFile(req, res, next) {
       title,
       citizenName,
       citizenPhone: cleanPhone,
+      citizenEmail: citizenEmail ? citizenEmail.trim().toLowerCase() : undefined,
       documentType,
       wardCode,
       currentStatus: FILE_STATUSES.RECEIVED,
@@ -115,6 +118,13 @@ export async function registerFile(req, res, next) {
       location: currentLocation,
     });
 
+    // Notify citizen via Email if email address was provided
+    const emailResult = await sendEmailNotification({
+      file,
+      status: FILE_STATUSES.RECEIVED,
+      location: currentLocation,
+    });
+
     return res.status(201).json({
       success: true,
       file: {
@@ -122,12 +132,16 @@ export async function registerFile(req, res, next) {
         fileUid: file.fileUid,
         trackingId: file.trackingId,
         title: file.title,
+        citizenName: file.citizenName,
+        citizenPhone: file.citizenPhone,
+        citizenEmail: file.citizenEmail,
         currentStatus: file.currentStatus,
         currentLocation: file.currentLocation,
         qrPayload: file.qrPayload,
         qrDataUrl: file.qrDataUrl,
       },
       smsNotified: smsResult?.success ?? false,
+      emailNotified: emailResult?.success ?? false,
       citizenTrackingUrl: `/track/${file.trackingId}`,
     });
   } catch (err) {
@@ -473,6 +487,14 @@ export async function forwardFile(req, res, next) {
       notes,
     });
 
+    // Notify citizen via Email on status transition
+    const emailResult = await sendEmailNotification({
+      file: result.file,
+      status: result.file.currentStatus,
+      location: result.file.currentLocation,
+      notes,
+    });
+
     return res.json({
       success: true,
       file: {
@@ -487,6 +509,7 @@ export async function forwardFile(req, res, next) {
         entryHash: result.logEntry.entryHash,
       },
       smsNotified: smsResult?.success ?? false,
+      emailNotified: emailResult?.success ?? false,
     });
   } catch (err) {
     if (err.message === 'File not found') {
@@ -548,6 +571,14 @@ export async function backtrackFile(req, res, next) {
       notes: backtrackReason,
     });
 
+    // Notify citizen via Email on backtrack event
+    const emailResult = await sendEmailNotification({
+      file: result.file,
+      status: FILE_STATUSES.BACKTRACKED,
+      location: returnLocation,
+      notes: backtrackReason,
+    });
+
     return res.json({
       success: true,
       file: {
@@ -563,6 +594,7 @@ export async function backtrackFile(req, res, next) {
         entryHash: result.logEntry.entryHash,
       },
       smsNotified: smsResult?.success ?? false,
+      emailNotified: emailResult?.success ?? false,
     });
   } catch (err) {
     if (err.message === 'File not found') {

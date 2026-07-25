@@ -64,7 +64,7 @@ export async function sendSmsNotification({ file, status, location, notes }) {
 
   try {
     if (provider === 'twilio' && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-      // Production Twilio integration fallback
+      // Production Twilio integration
       const sid = process.env.TWILIO_ACCOUNT_SID;
       const auth = process.env.TWILIO_AUTH_TOKEN;
       const from = process.env.TWILIO_PHONE_NUMBER;
@@ -96,6 +96,29 @@ export async function sendSmsNotification({ file, status, location, notes }) {
         errorMessage = errorData.message || 'Twilio API call failed';
         console.error('[SMS SERVICE] Twilio dispatch error:', errorMessage);
       }
+    } else if (provider === 'sparrow' && process.env.SPARROW_SMS_TOKEN) {
+      // Nepal Sparrow SMS gateway integration
+      const token = process.env.SPARROW_SMS_TOKEN;
+      const identity = process.env.SPARROW_SMS_IDENTITY || 'Demo';
+      const to = file.citizenPhone.replace(/^\+977/, '');
+
+      const sparrowUrl = `http://api.sparrowsms.com/v2/sms/?${new URLSearchParams({
+        token,
+        from: identity,
+        to,
+        text: message,
+      })}`;
+
+      const response = await fetch(sparrowUrl);
+      const data = await response.json();
+      if (response.ok && data.response_code === 200) {
+        deliveryStatus = 'sent';
+        console.log(`[SMS SERVICE] Sparrow SMS dispatched successfully to ${to}`);
+      } else {
+        deliveryStatus = 'failed';
+        errorMessage = data.response || 'Sparrow SMS API error';
+        console.error('[SMS SERVICE] Sparrow SMS dispatch error:', errorMessage);
+      }
     } else {
       // Mock / Local Development mode simulation
       deliveryStatus = 'simulated';
@@ -106,6 +129,7 @@ export async function sendSmsNotification({ file, status, location, notes }) {
       console.log(`Trigger   : Status changed to "${status || file.currentStatus}"`);
       console.log(`Location  : ${location || file.currentLocation}`);
       console.log(`Message   : ${message}`);
+      console.log('Mode      : MOCK SIMULATION (Add API credentials to .env to deliver real cellular SMS)');
       console.log('======================================================\n');
     }
   } catch (err) {

@@ -10,7 +10,7 @@ import { generateQrCode } from '../src/services/qrService.js';
 import { appendMovementLog } from '../src/services/ledgerService.js';
 
 // Load environment configuration
-dotenv.config();
+dotenv.config({ path: '../.env' });
 
 /**
  * Usage:

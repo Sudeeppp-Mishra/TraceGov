@@ -3,9 +3,11 @@ import { File, FILE_STATUSES } from '../models/File.js';
 import { MovementHistory } from '../models/MovementHistory.js';
 import { Department } from '../models/Department.js';
 import { User } from '../models/User.js';
+import { SmsLog } from '../models/SmsLog.js';
 import { generateFileUid, generateTrackingId } from '../services/cryptoService.js';
 import { generateQrCode, parseQrPayload } from '../services/qrService.js';
 import { appendMovementLog, verifyLogChain } from '../services/ledgerService.js';
+import { sendSmsNotification } from '../services/smsService.js';
 
 // Helper: Calculate processing time differences in minutes
 function minutesBetween(a, b) {
@@ -106,6 +108,13 @@ export async function registerFile(req, res, next) {
       notes: `File registered: ${title}`,
     });
 
+    // Notify citizen via SMS on initial registration status
+    const smsResult = await sendSmsNotification({
+      file,
+      status: FILE_STATUSES.RECEIVED,
+      location: currentLocation,
+    });
+
     return res.status(201).json({
       success: true,
       file: {
@@ -118,6 +127,7 @@ export async function registerFile(req, res, next) {
         qrPayload: file.qrPayload,
         qrDataUrl: file.qrDataUrl,
       },
+      smsNotified: smsResult?.success ?? false,
       citizenTrackingUrl: `/track/${file.trackingId}`,
     });
   } catch (err) {
@@ -455,6 +465,14 @@ export async function forwardFile(req, res, next) {
       return { file, logEntry };
     });
 
+    // Notify citizen via SMS on status transition
+    const smsResult = await sendSmsNotification({
+      file: result.file,
+      status: result.file.currentStatus,
+      location: result.file.currentLocation,
+      notes,
+    });
+
     return res.json({
       success: true,
       file: {
@@ -468,6 +486,7 @@ export async function forwardFile(req, res, next) {
         timestamp: result.logEntry.timestamp,
         entryHash: result.logEntry.entryHash,
       },
+      smsNotified: smsResult?.success ?? false,
     });
   } catch (err) {
     if (err.message === 'File not found') {
@@ -521,6 +540,14 @@ export async function backtrackFile(req, res, next) {
       return { file, logEntry };
     });
 
+    // Notify citizen via SMS on backtrack event
+    const smsResult = await sendSmsNotification({
+      file: result.file,
+      status: FILE_STATUSES.BACKTRACKED,
+      location: returnLocation,
+      notes: backtrackReason,
+    });
+
     return res.json({
       success: true,
       file: {
@@ -535,6 +562,7 @@ export async function backtrackFile(req, res, next) {
         timestamp: result.logEntry.timestamp,
         entryHash: result.logEntry.entryHash,
       },
+      smsNotified: smsResult?.success ?? false,
     });
   } catch (err) {
     if (err.message === 'File not found') {
@@ -686,6 +714,33 @@ export async function getActivityLog(req, res, next) {
         total,
         totalPages: Math.max(1, Math.ceil(total / limit)),
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Retrieve SMS dispatch log history for a specific file.
+ */
+export async function getFileSmsLogs(req, res, next) {
+  try {
+    const fileId = req.params.id;
+    const file = await File.findById(fileId).select('fileUid citizenName citizenPhone').lean();
+    if (!file) {
+      return res.status(404).json({ success: false, error: 'File not found' });
+    }
+
+    const smsLogs = await SmsLog.find({ fileId })
+      .sort({ sentAt: -1 })
+      .lean();
+
+    return res.json({
+      success: true,
+      citizenPhone: file.citizenPhone,
+      citizenName: file.citizenName,
+      logs: smsLogs,
+      count: smsLogs.length,
     });
   } catch (err) {
     next(err);

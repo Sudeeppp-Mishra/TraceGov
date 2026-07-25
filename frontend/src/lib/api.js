@@ -103,6 +103,8 @@ export const api = {
     return request(`/files/inbox${qs ? `?${qs}` : ''}`);
   },
 
+  getFileSmsLogs: (id) => request(`/files/${id}/sms-logs`),
+
   // Paginated movement-ledger activity (officers: own actions; admins: whole ward)
   getActivity: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

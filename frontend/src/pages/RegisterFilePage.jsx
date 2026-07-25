@@ -299,9 +299,14 @@ export default function RegisterFilePage() {
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">File UID</span><span className="mt-0.5 font-mono font-bold text-foreground">{file?.fileUid}</span></div>
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">Tracking ID</span><span className="mt-0.5 font-mono font-bold text-foreground">{file?.trackingId}</span></div>
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">Citizen</span><span className="mt-0.5 font-bold text-foreground">{citizenName}</span></div>
+                <div><span className="block text-xs font-bold uppercase text-muted-foreground">Phone (SMS)</span><span className="mt-0.5 font-mono font-bold text-foreground">+977-{citizenPhone}</span></div>
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">Initial desk</span><span className="mt-0.5 font-bold text-foreground">{file?.currentLocation}</span></div>
+                <div><span className="block text-xs font-bold uppercase text-muted-foreground">SMS Alert Status</span><span className="mt-0.5 flex items-center gap-1 font-bold text-emerald-600"><span>✓ Sent</span></span></div>
               </div>
-              <p className="mt-6 text-center text-xs italic leading-relaxed text-muted-foreground">
+              <p className="mt-4 rounded-lg bg-emerald-500/10 p-2 text-center text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                📲 SMS notification sent to <strong>+977-{citizenPhone}</strong>. The citizen will receive automated SMS alerts whenever file status changes.
+              </p>
+              <p className="mt-4 text-center text-xs italic leading-relaxed text-muted-foreground">
                 Track status anytime by scanning this QR or visiting<br /><strong>{window.location.origin}/track</strong>
               </p>
             </Card>

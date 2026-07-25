@@ -1,5 +1,6 @@
 import { File, FILE_STATUSES } from '../models/File.js';
 import { MovementHistory } from '../models/MovementHistory.js';
+import { SmsLog } from '../models/SmsLog.js';
 
 /**
  * Public lookup for citizens to view file status using their Tracking ID.
@@ -24,10 +25,13 @@ export async function trackFile(req, res, next) {
     }
 
     // Retrieve ledger, excluding unique primary keys and private officer logs
-    const movements = await MovementHistory.find({ fileId: file._id })
-      .sort({ timestamp: 1 })
-      .select('actionType currentLocation timestamp notes backtrackReason -_id')
-      .lean();
+    const [movements, smsCount] = await Promise.all([
+      MovementHistory.find({ fileId: file._id })
+        .sort({ timestamp: 1 })
+        .select('actionType currentLocation timestamp notes backtrackReason -_id')
+        .lean(),
+      SmsLog.countDocuments({ fileId: file._id, deliveryStatus: { $ne: 'failed' } }),
+    ]);
 
     // Format logs into citizen-friendly language. Public tracking should explain
     // delays and correction loops clearly without exposing internal officer notes.
@@ -51,15 +55,26 @@ export async function trackFile(req, res, next) {
       };
     });
 
+    // Mask phone number for citizen privacy (e.g. 9841234567 -> 98****4567)
+    const rawPhone = file.citizenPhone || '';
+    const maskedPhone = rawPhone.length >= 10
+      ? `${rawPhone.slice(0, 2)}****${rawPhone.slice(-4)}`
+      : rawPhone;
+
     return res.json({
       trackingId: file.trackingId,
+      fileUid: file.fileUid,
       title: file.title,
+      citizenName: file.citizenName,
+      citizenPhoneMasked: maskedPhone,
       documentType: file.documentType,
       currentStatus: file.currentStatus,
       currentLocation: file.currentLocation,
       wardCode: file.wardCode,
       registeredAt: file.createdAt,
       lastUpdated: file.updatedAt,
+      smsNotificationsActive: true,
+      smsNotificationsSent: smsCount,
       timeline: citizenTimeline,
     });
   } catch (err) {

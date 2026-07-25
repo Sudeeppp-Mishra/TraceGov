@@ -8,6 +8,7 @@ import {
   searchFiles,
   getOfficerInbox,
   getActivityLog,
+  getFileSmsLogs,
 } from '../controllers/fileController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { validateRegisterFile, validateForward, validateBacktrack } from '../middleware/validation.js';
@@ -32,5 +33,8 @@ router.get('/scan/:identifier', scanFile);
 // File routing action endpoints
 router.post('/:id/forward', validateForward, forwardFile);
 router.post('/:id/backtrack', validateBacktrack, backtrackFile);
+
+// SMS audit logs endpoint
+router.get('/:id/sms-logs', getFileSmsLogs);
 
 export default router;

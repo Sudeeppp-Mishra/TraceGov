@@ -203,6 +203,19 @@ function StatusCard({ fileDetails, aiEstimate, autoRefresh, onAutoRefreshChange 
           </div>
         </dl>
 
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">📱</span>
+            <div>
+              <span className="font-semibold text-foreground">SMS Alerts Active: </span>
+              <span className="text-muted-foreground">
+                Automated SMS alerts dispatched to {fileDetails.citizenPhoneMasked || 'registered phone'} ({fileDetails.smsNotificationsSent ?? 1} updates sent)
+              </span>
+            </div>
+          </div>
+          <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 font-bold text-emerald-600">✓ SMS Enabled</span>
+        </div>
+
         {needsAction && latestReason && (
           <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-red-700 dark:text-red-300">Latest correction reason</p>

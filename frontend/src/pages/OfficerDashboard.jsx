@@ -166,8 +166,9 @@ export default function OfficerDashboard() {
     if (!nextLocation) return;
     setActionLoading(true);
     try {
-      await api.forwardFile(selectedFile.id, { nextLocation, nextStatus, notes: routingNotes.trim() });
-      toast.success(`File routed successfully with "${nextStatus}" status.`);
+      const res = await api.forwardFile(selectedFile.id, { nextLocation, nextStatus, notes: routingNotes.trim() });
+      const smsMsg = res?.smsNotified ? ' 📱 SMS alert sent to citizen.' : '';
+      toast.success(`File routed with "${nextStatus}" status.${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid);
     } catch (err) {
@@ -180,10 +181,11 @@ export default function OfficerDashboard() {
     if (!backtrackLocation || !backtrackReason.trim()) return;
     setActionLoading(true);
     try {
-      await api.backtrackFile(selectedFile.id, {
+      const res = await api.backtrackFile(selectedFile.id, {
         returnLocation: backtrackLocation, backtrackReason: backtrackReason.trim(), internalNotes: internalNotes.trim(),
       });
-      toast.success(`File returned to ${backtrackLocation}.`);
+      const smsMsg = res?.smsNotified ? ' 📱 SMS alert sent to citizen.' : '';
+      toast.success(`File returned to ${backtrackLocation}.${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid);
     } catch (err) {

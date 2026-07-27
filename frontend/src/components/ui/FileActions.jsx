@@ -147,67 +147,90 @@ export function FileActions({
         </Button>
       </div>
 
-      <Tabs tabs={tabs} active={actionTab} onChange={setActionTab} />
-
-      {/* Manual Action Bypass Reason Box */}
-      {!isScanVerified && !isClosed && actionTab !== 'ai' && (
-        <div className="space-y-1.5 p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5">
-          <label htmlFor="manual_reason_input" className="block text-xs font-semibold text-amber-900 dark:text-amber-200">
-            Mandatory manual update reason <span className="text-red-500">*</span>
-          </label>
-          <Input
-            id="manual_reason_input"
-            placeholder="e.g. QR code damaged, Camera unavailable, Bulk processing"
-            value={manualReason}
-            onChange={(e) => {
-              setManualReason(e.target.value);
-              if (e.target.value.trim()) setManualReasonError('');
-            }}
-            required
-            className="bg-background text-xs"
-          />
-          {manualReasonError && (
-            <p className="text-xs font-semibold text-red-500 mt-1">{manualReasonError}</p>
-          )}
-        </div>
-      )}
-
-      {/* In Transit Receive Card */}
-      {isInTransit && (
-        <div className="space-y-4 p-4 rounded-xl border border-primary/20 bg-primary/5">
+      {/* If file is in transit, block all forward/backtrack actions until physical receipt is confirmed */}
+      {isInTransit ? (
+        <div className="space-y-4 p-5 rounded-2xl border border-primary/30 bg-primary/[0.03]">
           <div className="flex items-start gap-3">
-            <Icons.Clock className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Icons.Clock className="h-5 w-5" />
+            </div>
             <div>
               <h4 className="text-sm font-bold text-foreground">File in transit to {selectedFile.targetLocation || 'your desk'}</h4>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Sent from <strong>{selectedFile.currentLocation}</strong>. Confirm physical receipt via QR scan (or manual ID confirm) to receive into your active desk queue.
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                Sent from <strong>{selectedFile.currentLocation}</strong>. Physical receipt confirmation is required before any forward or backtrack routing can be performed.
               </p>
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+          <div className="space-y-3 pt-2">
             <Button
               variant="primary"
-              size="md"
+              size="lg"
               onClick={onScanClick}
-              className="w-full sm:w-auto shadow-sm"
+              className="w-full shadow-md"
               loading={actionLoading}
             >
-              <Icons.Scan className="h-4 w-4" /> Scan QR to Confirm Receipt
+              <Icons.Scan className="h-5 w-5" /> Scan QR Tag to Confirm Receipt (Primary)
             </Button>
-            {!isScanVerified && (
-              <Button
-                variant="outline"
-                size="md"
-                onClick={handleReceive}
-                className="w-full sm:w-auto"
-                loading={actionLoading}
-              >
-                Confirm Receipt Manually
-              </Button>
-            )}
+
+            <div className="pt-2 border-t border-border/60 space-y-2">
+              <label htmlFor="manual_receive_reason" className="block text-xs font-semibold text-muted-foreground">
+                Can't scan? Confirm receipt manually with mandatory reason <span className="text-red-500">*</span>
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  id="manual_receive_reason"
+                  placeholder="e.g. QR code damaged, Camera unavailable"
+                  value={manualReason}
+                  onChange={(e) => {
+                    setManualReason(e.target.value);
+                    if (e.target.value.trim()) setManualReasonError('');
+                  }}
+                  className="bg-background text-xs flex-1"
+                />
+                <Button
+                  variant="outline"
+                  size="md"
+                  onClick={handleReceive}
+                  className="shrink-0"
+                  loading={actionLoading}
+                >
+                  Confirm Receipt Manually
+                </Button>
+              </div>
+              {manualReasonError && (
+                <p className="text-xs font-semibold text-red-500 mt-1">{manualReasonError}</p>
+              )}
+            </div>
           </div>
         </div>
+      ) : (
+        <>
+          <Tabs tabs={tabs} active={actionTab} onChange={setActionTab} />
+
+          {/* Manual Action Bypass Reason Box for Forward/Backtrack */}
+          {!isScanVerified && !isClosed && actionTab !== 'ai' && (
+            <div className="space-y-1.5 p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5">
+              <label htmlFor="manual_reason_input" className="block text-xs font-semibold text-amber-900 dark:text-amber-200">
+                Mandatory manual update reason <span className="text-red-500">*</span>
+              </label>
+              <Input
+                id="manual_reason_input"
+                placeholder="e.g. QR code damaged, Camera unavailable, Bulk processing"
+                value={manualReason}
+                onChange={(e) => {
+                  setManualReason(e.target.value);
+                  if (e.target.value.trim()) setManualReasonError('');
+                }}
+                required
+                className="bg-background text-xs"
+              />
+              {manualReasonError && (
+                <p className="text-xs font-semibold text-red-500 mt-1">{manualReasonError}</p>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {actionTab === 'forward' && !isClosed && !isInTransit && (

@@ -137,14 +137,17 @@ export async function sendEmailNotification({ file, status, location, notes }) {
       }
 
       if (nodemailer) {
-        const port = Number(process.env.SMTP_PORT) || 587;
-        const secure = process.env.SMTP_SECURE === 'true' ? true : (process.env.SMTP_SECURE === 'false' ? false : port === 465);
+        const port = Number(process.env.SMTP_PORT) || 465;
+        const secure = process.env.SMTP_SECURE !== undefined ? process.env.SMTP_SECURE === 'true' : port === 465;
 
         const transporterOptions = {
           host: smtpHost,
           port,
           secure,
           family: 4, // Force IPv4 address resolution (fixes Render cloud IPv6 ENETUNREACH error)
+          connectionTimeout: 15000,
+          greetingTimeout: 15000,
+          socketTimeout: 15000,
           auth: {
             user: smtpUser,
             pass: smtpPass,

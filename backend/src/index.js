@@ -19,6 +19,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// Enable trust proxy for cloud deployment (Render, Vercel)
+app.set('trust proxy', 1);
+
 // Allowed origins for local dev and production deployment
 const allowedOrigins = [
   'http://localhost:5173',

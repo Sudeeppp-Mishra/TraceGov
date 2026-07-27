@@ -16,6 +16,7 @@ export function FileActions({
   onScanClick,
   onForwardSubmit,
   onBacktrackSubmit,
+  onReceiveSubmit,
 }) {
   // Routing form state
   const [nextLocation, setNextLocation] = useState('');
@@ -33,6 +34,24 @@ export function FileActions({
 
   const isScanVerified = scannedVia === 'webcam' || scannedVia === 'mobile';
   const isClosed = ['Dispatched', 'Approved', 'Rejected'].includes(selectedFile?.currentStatus);
+  const isInTransit = selectedFile?.currentStatus === 'In Transit';
+
+  const handleReceive = (e) => {
+    if (e) e.preventDefault();
+    setManualReasonError('');
+
+    if (!isScanVerified && !manualReason.trim()) {
+      setManualReasonError('Mandatory reason required for manual receipt confirm (e.g. QR damaged, Camera unavailable).');
+      return;
+    }
+
+    if (onReceiveSubmit) {
+      onReceiveSubmit({
+        scannedVia: isScanVerified ? scannedVia : 'manual',
+        remarks: isScanVerified ? undefined : manualReason.trim(),
+      });
+    }
+  };
 
   const handleForward = (e) => {
     e.preventDefault();
@@ -153,7 +172,45 @@ export function FileActions({
         </div>
       )}
 
-      {actionTab === 'forward' && !isClosed && (
+      {/* In Transit Receive Card */}
+      {isInTransit && (
+        <div className="space-y-4 p-4 rounded-xl border border-primary/20 bg-primary/5">
+          <div className="flex items-start gap-3">
+            <Icons.Clock className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+            <div>
+              <h4 className="text-sm font-bold text-foreground">File in transit to {selectedFile.targetLocation || 'your desk'}</h4>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Sent from <strong>{selectedFile.currentLocation}</strong>. Confirm physical receipt via QR scan (or manual ID confirm) to receive into your active desk queue.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+            <Button
+              variant="primary"
+              size="md"
+              onClick={onScanClick}
+              className="w-full sm:w-auto shadow-sm"
+              loading={actionLoading}
+            >
+              <Icons.Scan className="h-4 w-4" /> Scan QR to Confirm Receipt
+            </Button>
+            {!isScanVerified && (
+              <Button
+                variant="outline"
+                size="md"
+                onClick={handleReceive}
+                className="w-full sm:w-auto"
+                loading={actionLoading}
+              >
+                Confirm Receipt Manually
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {actionTab === 'forward' && !isClosed && !isInTransit && (
         <form onSubmit={handleForward} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Select
@@ -204,7 +261,7 @@ export function FileActions({
         </form>
       )}
 
-      {actionTab === 'backtrack' && !isClosed && (
+      {actionTab === 'backtrack' && !isClosed && !isInTransit && (
         <form onSubmit={handleBacktrack} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Select

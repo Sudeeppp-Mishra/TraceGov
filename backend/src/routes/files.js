@@ -5,6 +5,7 @@ import {
   scanFile,
   forwardFile,
   backtrackFile,
+  receiveFile,
   searchFiles,
   getOfficerInbox,
   getActivityLog,
@@ -33,6 +34,7 @@ router.get('/scan/:identifier', scanFile);
 // File routing action endpoints
 router.post('/:id/forward', validateForward, forwardFile);
 router.post('/:id/backtrack', validateBacktrack, backtrackFile);
+router.post('/:id/receive', receiveFile);
 
 // SMS audit logs endpoint
 router.get('/:id/sms-logs', getFileSmsLogs);

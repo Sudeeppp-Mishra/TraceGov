@@ -10,6 +10,7 @@ export const ACTION_TYPES = {
   BACKTRACKED: 'Backtracked',
   RETURNED: 'Returned',
   REJECTED: 'Rejected',
+  IN_TRANSIT: 'In Transit',
 };
 
 const movementHistorySchema = new mongoose.Schema(

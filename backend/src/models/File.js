@@ -10,6 +10,7 @@ export const FILE_STATUSES = {
   BACKTRACKED: 'Backtracked',
   RETURNED: 'Returned',
   REJECTED: 'Rejected',
+  IN_TRANSIT: 'In Transit',
 };
 
 const fileSchema = new mongoose.Schema(
@@ -72,6 +73,11 @@ const fileSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Current location/desk is required'],
       default: 'Reception',
+      index: true,
+      trim: true,
+    },
+    targetLocation: {
+      type: String,
       index: true,
       trim: true,
     },

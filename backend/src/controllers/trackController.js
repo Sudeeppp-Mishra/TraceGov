@@ -28,7 +28,7 @@ export async function trackFile(req, res, next) {
     const [movements, smsCount] = await Promise.all([
       MovementHistory.find({ fileId: file._id })
         .sort({ timestamp: 1 })
-        .select('actionType currentLocation timestamp notes backtrackReason scannedVia remarks -_id')
+        .select('actionType currentLocation nextLocation timestamp notes backtrackReason scannedVia remarks -_id')
         .lean(),
       SmsLog.countDocuments({ fileId: file._id, deliveryStatus: { $ne: 'failed' } }),
     ]);
@@ -38,7 +38,11 @@ export async function trackFile(req, res, next) {
     const citizenTimeline = movements.map((log) => {
       let displayMessage = log.notes || log.actionType;
 
-      if (log.actionType === FILE_STATUSES.BACKTRACKED) {
+      if (log.actionType === FILE_STATUSES.IN_TRANSIT) {
+        displayMessage = log.backtrackReason
+          ? `In Transit — Returning to ${log.nextLocation || 'desk'} for correction: ${log.backtrackReason}`
+          : `In Transit — On its way to ${log.nextLocation || log.currentLocation}`;
+      } else if (log.actionType === FILE_STATUSES.BACKTRACKED) {
         displayMessage = log.backtrackReason
           ? `Returned for correction: ${log.backtrackReason}`
           : 'Returned for correction. Please contact the current desk for details.';

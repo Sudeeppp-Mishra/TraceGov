@@ -13,6 +13,7 @@ export default function OfficerInbox() {
   const [currentUser, setCurrentUser] = useState(null);
   const [deskFiles, setDeskFiles] = useState([]);
   const [wardFiles, setWardFiles] = useState([]);
+  const [incomingFiles, setIncomingFiles] = useState([]);
   const [departmentQueue, setDepartmentQueue] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('desk');
@@ -27,13 +28,15 @@ export default function OfficerInbox() {
     const user = getStoredUser();
     if (!user) return;
     try {
-      const [summary, deskData, wardData] = await Promise.all([
+      const [summary, deskData, wardData, incomingData] = await Promise.all([
         api.dashboardSummary({ wardCode: user.wardCode }),
         api.getOfficerInbox({ scope: 'desk' }),
         api.getOfficerInbox(),
+        api.getOfficerInbox({ scope: 'incoming' }),
       ]);
       setDeskFiles(deskData.files || []);
       setWardFiles(wardData.files || []);
+      setIncomingFiles(incomingData.files || []);
       setDepartmentQueue(summary.departmentQueue || []);
     } catch { /* handled by empty state */ } finally {
       setLoading(false);
@@ -50,12 +53,13 @@ export default function OfficerInbox() {
     () => wardFiles.filter((f) => f.currentStatus === 'Backtracked' || f.currentStatus === 'Pending').sort(byOldest),
     [wardFiles]
   );
-  const list = tab === 'desk' ? atMyDesk : needsAttention;
+  const list = tab === 'desk' ? atMyDesk : tab === 'incoming' ? incomingFiles : needsAttention;
 
   const openFile = (fileUid) => navigate(`/officer?file=${encodeURIComponent(fileUid)}`);
 
   const TABS = [
     { id: 'desk', label: `My desk (${atMyDesk.length})`, icon: Icons.Folder },
+    { id: 'incoming', label: `Incoming in-transit (${incomingFiles.length})`, icon: Icons.Clock },
     { id: 'attention', label: `Needs attention (${needsAttention.length})`, icon: Icons.AlertCircle },
   ];
 

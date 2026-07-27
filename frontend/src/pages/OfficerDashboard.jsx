@@ -18,36 +18,32 @@ export default function OfficerDashboard() {
   const [departmentQueue, setDepartmentQueue] = useState([]);
   const [recentHistory, setRecentHistory] = useState([]);
   const [departmentsList, setDepartmentsList] = useState([]);
+  const [incomingFiles, setIncomingFiles] = useState([]);
+  const [loading, setLoading] = useState(true);
 
+  // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [activeResultIndex, setActiveResultIndex] = useState(-1);
+  const [showManualSearch, setShowManualSearch] = useState(false);
+
+  // Selection & action state
   const [selectedFile, setSelectedFile] = useState(null);
   const [selectedFileHistory, setSelectedFileHistory] = useState([]);
   const [isAuditValid, setIsAuditValid] = useState(true);
-
-  // Track verification method: 'webcam' | 'mobile' | 'manual'
   const [scannedVia, setScannedVia] = useState('manual');
-  const [showManualSearch, setShowManualSearch] = useState(false);
-
-  const [actionTab, setActionTab] = useState('forward');
-  const [nextLocation, setNextLocation] = useState('');
-  const [nextStatus, setNextStatus] = useState('Pending');
-  const [routingNotes, setRoutingNotes] = useState('');
-  const [backtrackLocation, setBacktrackLocation] = useState('');
-  const [backtrackReason, setBacktrackReason] = useState('');
-  const [internalNotes, setInternalNotes] = useState('');
-
-  const [aiDelayReport, setAiDelayReport] = useState(null);
-  const [aiBacktrackSuggest, setAiBacktrackSuggest] = useState(null);
-  const [checkingAi, setCheckingAi] = useState(false);
-
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
-
-  const [loading, setLoading] = useState(true);
   const [fileLoading, setFileLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [actionTab, setActionTab] = useState('forward');
+
+  // QR Scanner modal state
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+
+  // AI insights state
+  const [checkingAi, setCheckingAi] = useState(false);
+  const [aiDelayReport, setAiDelayReport] = useState(null);
+  const [aiBacktrackSuggest, setAiBacktrackSuggest] = useState(null);
 
   useEffect(() => {
     const user = getStoredUser();
@@ -56,11 +52,11 @@ export default function OfficerDashboard() {
     loadDashboard(user.wardCode);
   }, [navigate]);
 
-  // Auto-open a file passed via ?file= (e.g. from the Inbox), then clear the param.
+  // Read URL query parameter for file selection on page load
   useEffect(() => {
-    const fileParam = searchParams.get('file');
-    if (fileParam) {
-      handleSelectFile(fileParam, 'manual');
+    const fileIdParam = searchParams.get('file');
+    if (fileIdParam) {
+      handleSelectFile(fileIdParam);
       searchParams.delete('file');
       setSearchParams(searchParams, { replace: true });
     }
@@ -70,14 +66,16 @@ export default function OfficerDashboard() {
   const loadDashboard = async (wardCode) => {
     try {
       setLoading(true);
-      const [summary, deptsData] = await Promise.all([
+      const [summary, deptsData, incomingData] = await Promise.all([
         api.dashboardSummary({ wardCode }),
         api.getDepartments().catch(() => ({ departments: [] })),
+        api.getOfficerInbox({ scope: 'incoming' }).catch(() => ({ files: [] })),
       ]);
       setMetrics(summary.metrics);
       setDepartmentQueue(summary.departmentQueue || []);
       setRecentHistory(summary.recentHistory || []);
       setDepartmentsList(deptsData.departments || []);
+      setIncomingFiles(incomingData.files || []);
     } catch (err) {
       toast.error('Failed to load dashboard metrics.');
     } finally {
@@ -106,9 +104,8 @@ export default function OfficerDashboard() {
       setSelectedFileHistory(data.recentHistory || []);
       setIsAuditValid(data.auditChainValid);
       setScannedVia(scanMode);
-      setNextLocation(''); setBacktrackLocation(''); setRoutingNotes('');
-      setNextStatus('Pending');
-      setBacktrackReason(''); setInternalNotes(''); setAiDelayReport(null); setAiBacktrackSuggest(null);
+      setAiDelayReport(null); setAiBacktrackSuggest(null);
+
       // Closed files only expose the AI/history view — no routing tabs.
       setActionTab(['Dispatched', 'Approved', 'Rejected'].includes(data.file.currentStatus) ? 'ai' : 'forward');
       setSearchQuery(''); setSearchResults([]); setActiveResultIndex(-1);
@@ -119,8 +116,6 @@ export default function OfficerDashboard() {
     }
   };
 
-  // Keyboard support for the search results combobox: Arrow keys move the
-  // active option, Enter selects it, Escape clears the results.
   const handleSearchKeyDown = (e) => {
     if (searchResults.length === 0) return;
     if (e.key === 'ArrowDown') {
@@ -129,14 +124,13 @@ export default function OfficerDashboard() {
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveResultIndex((i) => (i - 1 < 0 ? searchResults.length - 1 : i - 1));
-    } else if (e.key === 'Enter') {
-      if (activeResultIndex >= 0 && searchResults[activeResultIndex]) {
-        e.preventDefault();
-        handleSelectFile(searchResults[activeResultIndex].fileUid);
-      }
-    } else if (e.key === 'Escape') {
+    } else if (e.key === 'Enter' && activeResultIndex >= 0) {
       e.preventDefault();
-      setSearchQuery(''); setSearchResults([]); setActiveResultIndex(-1);
+      handleSelectFile(searchResults[activeResultIndex].fileUid, 'manual');
+      setShowManualSearch(false);
+    } else if (e.key === 'Escape') {
+      setSearchResults([]);
+      setActiveResultIndex(-1);
     }
   };
 
@@ -144,19 +138,10 @@ export default function OfficerDashboard() {
     if (!selectedFile) return;
     setCheckingAi(true);
     try {
-      const activeQueue = departmentQueue.find((q) => q._id === selectedFile.currentLocation);
-      const queueLength = activeQueue ? activeQueue.count : 0;
       const [delayReport, backtrackReport] = await Promise.all([
-        api.predictDelay({
-          currentStatus: selectedFile.currentStatus, currentLocation: selectedFile.currentLocation,
-          requiredDocuments: selectedFile.requiredDocuments || [], submittedDocuments: selectedFile.requiredDocuments || [],
-          movementData: selectedFileHistory.map((h) => ({ action: h.actionType, timestamp: h.timestamp })),
-          departmentQueueLength: queueLength,
-        }).catch(() => null),
-        api.smartBacktrack({
-          documentType: selectedFile.documentType, currentLocation: selectedFile.currentLocation,
-          requiredDocuments: selectedFile.requiredDocuments || [], submittedDocuments: [],
-          movementData: selectedFileHistory.map((h) => ({ action: h.actionType, timestamp: h.timestamp })),
+        api.getAiDelayReport(selectedFile.fileUid).catch(() => null),
+        api.getAiBacktrackReport(selectedFile.id, {
+          targetDesk: currentUser?.deskLocation || 'Verification',
         }).catch(() => null),
       ]);
       setAiDelayReport(delayReport);
@@ -171,14 +156,10 @@ export default function OfficerDashboard() {
         nextLocation: targetLoc,
         nextStatus: targetStatus,
         notes,
-        scannedVia: actionScannedVia,
-        scanned_via: actionScannedVia,
-        remarks,
-        manualReason: remarks,
       });
       const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
       const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
-      toast.success(`File routed with "${targetStatus}" status.${emailMsg}${smsMsg}`);
+      toast.success(`File dispatched to ${targetLoc}.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid, actionScannedVia);
     } catch (err) {
@@ -193,6 +174,22 @@ export default function OfficerDashboard() {
         returnLocation: targetLoc,
         backtrackReason: reason,
         internalNotes: intNotes,
+      });
+      const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
+      const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
+      toast.success(`File return dispatched to ${targetLoc}.${emailMsg}${smsMsg}`);
+      await loadDashboard(currentUser.wardCode);
+      await handleSelectFile(selectedFile.fileUid, actionScannedVia);
+    } catch (err) {
+      toast.error(err.message || 'Backtrack routing failed.');
+    } finally { setActionLoading(false); }
+  };
+
+  const handleReceiveFile = async ({ scannedVia: actionScannedVia, remarks }) => {
+    if (!selectedFile) return;
+    setActionLoading(true);
+    try {
+      const res = await api.receiveFile(selectedFile.id, {
         scannedVia: actionScannedVia,
         scanned_via: actionScannedVia,
         remarks,
@@ -200,11 +197,11 @@ export default function OfficerDashboard() {
       });
       const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
       const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
-      toast.success(`File returned to ${targetLoc}.${emailMsg}${smsMsg}`);
+      toast.success(`Physical receipt confirmed. File received into queue.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid, actionScannedVia);
     } catch (err) {
-      toast.error(err.message || 'Backtrack routing failed.');
+      toast.error(err.message || 'Confirm receipt failed.');
     } finally { setActionLoading(false); }
   };
 
@@ -251,6 +248,42 @@ export default function OfficerDashboard() {
 
         <div className="grid items-start gap-6 md:grid-cols-[1.25fr_0.75fr]">
           <div className="space-y-6">
+            {/* Incoming Files in Transit Section */}
+            {incomingFiles.length > 0 && (
+              <Card className="border-primary/30 bg-primary/[0.02]">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <Icons.Clock className="h-4.5 w-4.5 text-primary" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                      Incoming Files in Transit ({incomingFiles.length})
+                    </h3>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">Informational · Scan on physical arrival</span>
+                </div>
+                <div className="divide-y divide-border/60">
+                  {incomingFiles.map((file) => (
+                    <div key={file.fileUid} className="py-2.5 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="font-mono text-[11px] text-primary font-semibold">{file.fileUid}</span>
+                        <p className="truncate text-xs font-semibold text-foreground">{file.title}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Sent from: <strong className="text-foreground">{file.currentLocation}</strong> · Citizen: {file.citizenName}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() => handleSelectFile(file.fileUid)}
+                        className="shrink-0"
+                      >
+                        <Icons.Scan className="h-3.5 w-3.5" /> Confirm Receipt
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
             {/* Primary QR Scan & Manual Search Card */}
             <Card className="relative p-5">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
@@ -390,6 +423,7 @@ export default function OfficerDashboard() {
                   onScanClick={() => setIsScannerOpen(true)}
                   onForwardSubmit={handleForwardFile}
                   onBacktrackSubmit={handleBacktrackFile}
+                  onReceiveSubmit={handleReceiveFile}
                 />
 
                 <Card>

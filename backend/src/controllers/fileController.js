@@ -417,9 +417,7 @@ async function runTransactionalWrite(operationsFn) {
 
 /**
  * Forward a file to another desk or location.
- * Dispatching without an explicit target routes the file to the ward's
- * archives desk (where closed physical files are stored); other final
- * statuses close the file at its current desk.
+ * Uses the unified Send core engine.
  */
 export async function forwardFile(req, res, next) {
   try {
@@ -427,20 +425,163 @@ export async function forwardFile(req, res, next) {
       nextLocation,
       nextStatus = FILE_STATUSES.PENDING,
       notes,
-      scannedVia: rawScannedVia,
-      scanned_via,
-      remarks: rawRemarks,
-      manualReason,
     } = req.body;
-
-    const scannedVia = (rawScannedVia || scanned_via || 'manual').toLowerCase();
-    const remarks = (rawRemarks || manualReason || notes || '').trim();
 
     const isFinalStatus = [FILE_STATUSES.APPROVED, FILE_STATUSES.DISPATCHED, FILE_STATUSES.REJECTED].includes(nextStatus);
 
     if (!nextLocation && !isFinalStatus) {
       return res.status(400).json({ error: 'nextLocation is required' });
     }
+
+    return await sendFileCore(req, res, next, {
+      direction: 'forward',
+      targetLocation: nextLocation,
+      nextStatus,
+      notes,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Backtrack a file (return to a previous desk for correction).
+ * Uses the unified Send core engine.
+ */
+export async function backtrackFile(req, res, next) {
+  try {
+    const {
+      returnLocation,
+      backtrackReason,
+      internalNotes,
+    } = req.body;
+
+    if (!returnLocation || !backtrackReason) {
+      return res.status(400).json({ error: 'returnLocation and backtrackReason are required' });
+    }
+
+    return await sendFileCore(req, res, next, {
+      direction: 'backtrack',
+      targetLocation: returnLocation,
+      backtrackReason,
+      internalNotes,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Shared Send core engine for both forward and backtrack actions.
+ * Updates currentStatus to 'In Transit' and sets targetLocation.
+ * Does NOT update currentLocation or assignedOfficerId (which update only on physical receive).
+ */
+async function sendFileCore(req, res, next, { direction, targetLocation, nextStatus, notes, backtrackReason, internalNotes }) {
+  try {
+    const result = await runTransactionalWrite(async (session) => {
+      const file = await File.findById(req.params.id).session(session);
+      if (!file) {
+        throw new Error('File not found');
+      }
+      if (file.isClosed) {
+        throw new Error('File closed');
+      }
+      if (file.currentStatus === FILE_STATUSES.IN_TRANSIT) {
+        throw new Error('File already in transit');
+      }
+
+      const previousLocation = file.currentLocation;
+      let destinationDesk = targetLocation || file.currentLocation;
+
+      if (direction === 'forward' && nextStatus === FILE_STATUSES.DISPATCHED && !targetLocation) {
+        const archiveDesk = await Department.findOne({
+          wardCode: file.wardCode,
+          isActive: true,
+          name: /archive/i,
+        })
+          .session(session)
+          .lean();
+        if (archiveDesk) destinationDesk = archiveDesk.name;
+      }
+
+      file.targetLocation = destinationDesk;
+      file.currentStatus = FILE_STATUSES.IN_TRANSIT;
+      await file.save({ session });
+
+      // Dispatch Log Entry #1 (Send Event)
+      const logEntry = await appendMovementLog({
+        fileId: file._id,
+        officerId: req.user._id,
+        actionType: FILE_STATUSES.IN_TRANSIT,
+        currentLocation: previousLocation,
+        previousLocation,
+        nextLocation: destinationDesk,
+        notes: notes || (direction === 'backtrack' ? `Returned for correction: ${backtrackReason}` : `Forwarded to ${destinationDesk}`),
+        backtrackReason: direction === 'backtrack' ? backtrackReason : undefined,
+        internalNotes,
+        scannedVia: 'manual',
+        session,
+      });
+
+      return { file, logEntry, destinationDesk };
+    });
+
+    // Notify citizen via SMS on status transition
+    const smsResult = await sendSmsNotification({
+      file: result.file,
+      status: FILE_STATUSES.IN_TRANSIT,
+      location: result.destinationDesk,
+      notes: direction === 'backtrack' ? backtrackReason : notes,
+    });
+
+    // Notify citizen via Email on status transition
+    const emailResult = await sendEmailNotification({
+      file: result.file,
+      status: FILE_STATUSES.IN_TRANSIT,
+      location: result.destinationDesk,
+      notes: direction === 'backtrack' ? backtrackReason : notes,
+    });
+
+    return res.json({
+      success: true,
+      file: {
+        id: result.file._id,
+        fileUid: result.file.fileUid,
+        currentStatus: result.file.currentStatus,
+        currentLocation: result.file.currentLocation,
+        targetLocation: result.file.targetLocation,
+      },
+      movement: {
+        actionType: result.logEntry.actionType,
+        timestamp: result.logEntry.timestamp,
+        entryHash: result.logEntry.entryHash,
+      },
+      smsNotified: smsResult?.success ?? false,
+      emailNotified: emailResult?.success ?? false,
+    });
+  } catch (err) {
+    if (err.message === 'File not found') {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    if (err.message === 'File closed') {
+      return res.status(400).json({ error: 'This file is already closed and cannot be sent.' });
+    }
+    if (err.message === 'File already in transit') {
+      return res.status(400).json({ error: 'This file is already in transit to a destination desk.' });
+    }
+    throw err;
+  }
+}
+
+/**
+ * Confirm physical receipt of an in-transit file (QR scan or manual ID confirm).
+ * Updates currentLocation and assignedOfficerId to receiving officer/desk.
+ */
+export async function receiveFile(req, res, next) {
+  try {
+    const { scannedVia: rawScannedVia, scanned_via, remarks: rawRemarks, manualReason } = req.body;
+    const scannedVia = (rawScannedVia || scanned_via || 'manual').toLowerCase();
+    const remarks = (rawRemarks || manualReason || '').trim();
 
     if (scannedVia === 'manual' && !remarks) {
       return res.status(400).json({ error: 'A mandatory reason (e.g. "QR damaged", "Bulk processing") is required for manual entry updates.' });
@@ -451,43 +592,36 @@ export async function forwardFile(req, res, next) {
       if (!file) {
         throw new Error('File not found');
       }
-      if (file.isClosed) {
-        throw new Error('File closed');
+      if (file.currentStatus !== FILE_STATUSES.IN_TRANSIT) {
+        throw new Error('File is not currently in transit');
       }
 
+      // Check latest movement log to determine if direction was backtrack
+      const lastLog = await MovementHistory.findOne({ fileId: file._id })
+        .sort({ timestamp: -1 })
+        .session(session)
+        .lean();
+
+      const isBacktrack = Boolean(lastLog && lastLog.backtrackReason);
+      const receivingDesk = file.targetLocation || req.user.deskLocation || 'Reception';
       const previousLocation = file.currentLocation;
-      let targetLocation = nextLocation || file.currentLocation;
 
-      // Dispatched files are physically moved to long-term storage: when no
-      // target desk was chosen, default to the ward's archives desk.
-      if (nextStatus === FILE_STATUSES.DISPATCHED && !nextLocation) {
-        const archiveDesk = await Department.findOne({
-          wardCode: file.wardCode,
-          isActive: true,
-          name: /archive/i,
-        })
-          .session(session)
-          .lean();
-        if (archiveDesk) targetLocation = archiveDesk.name;
-      }
-
-      file.currentLocation = targetLocation;
-      file.currentStatus = nextStatus;
-      if (isFinalStatus) {
-        file.isClosed = true;
-      } else {
-        file.isClosed = false;
-      }
+      // NOW update currentLocation and assignedOfficerId upon physical receipt!
+      file.previousLocation = previousLocation;
+      file.currentLocation = receivingDesk;
+      file.targetLocation = undefined;
+      file.assignedOfficerId = req.user._id;
+      file.currentStatus = isBacktrack ? FILE_STATUSES.BACKTRACKED : FILE_STATUSES.RECEIVED;
       await file.save({ session });
 
+      // Receipt Log Entry #2 (Receive Event)
       const logEntry = await appendMovementLog({
         fileId: file._id,
         officerId: req.user._id,
-        actionType: nextStatus,
-        currentLocation: targetLocation,
+        actionType: file.currentStatus,
+        currentLocation: receivingDesk,
         previousLocation,
-        nextLocation: targetLocation,
-        notes,
+        notes: `Received at ${receivingDesk}`,
         scannedVia,
         remarks: remarks || undefined,
         session,
@@ -496,20 +630,17 @@ export async function forwardFile(req, res, next) {
       return { file, logEntry };
     });
 
-    // Notify citizen via SMS on status transition
+    // Notify citizen via SMS & Email on arrival
     const smsResult = await sendSmsNotification({
       file: result.file,
       status: result.file.currentStatus,
       location: result.file.currentLocation,
-      notes,
     });
 
-    // Notify citizen via Email on status transition
     const emailResult = await sendEmailNotification({
       file: result.file,
       status: result.file.currentStatus,
       location: result.file.currentLocation,
-      notes,
     });
 
     return res.json({
@@ -534,145 +665,9 @@ export async function forwardFile(req, res, next) {
     if (err.message === 'File not found') {
       return res.status(404).json({ error: 'File not found' });
     }
-    if (err.message === 'File closed') {
-      return res.status(400).json({ error: 'This file is already closed. Closed files cannot be forwarded.' });
+    if (err.message === 'File is not currently in transit') {
+      return res.status(400).json({ error: 'This file is not currently in transit and cannot be received.' });
     }
-    next(err);
-  }
-}
-
-/**
- * Backtrack a file (reject/return for correction with a description reason).
- */
-export async function backtrackFile(req, res, next) {
-  try {
-    const {
-      returnLocation,
-      backtrackReason,
-      internalNotes,
-      scannedVia: rawScannedVia,
-      scanned_via,
-      remarks: rawRemarks,
-      manualReason,
-    } = req.body;
-
-    const scannedVia = (rawScannedVia || scanned_via || 'manual').toLowerCase();
-    const remarks = (rawRemarks || manualReason || backtrackReason || '').trim();
-
-    if (!returnLocation || !backtrackReason) {
-      return res.status(400).json({ error: 'returnLocation and backtrackReason are required' });
-    }
-
-    if (scannedVia === 'manual' && !remarks) {
-      return res.status(400).json({ error: 'A mandatory reason is required for manual entry backtrack updates.' });
-    }
-
-    const result = await runTransactionalWrite(async (session) => {
-      const file = await File.findById(req.params.id).session(session);
-      if (!file) {
-        throw new Error('File not found');
-      }
-      if (file.isClosed) {
-        throw new Error('File closed');
-      }
-
-      const previousLocation = file.currentLocation;
-      file.currentLocation = returnLocation;
-      file.currentStatus = FILE_STATUSES.BACKTRACKED;
-      await file.save({ session });
-
-      // Append ledger entry (marked as backtracked)
-      const logEntry = await appendMovementLog({
-        fileId: file._id,
-        officerId: req.user._id,
-        actionType: FILE_STATUSES.BACKTRACKED,
-        currentLocation: returnLocation,
-        previousLocation,
-        backtrackReason,
-        internalNotes,
-        notes: `Backtracked: ${backtrackReason}`,
-        scannedVia,
-        remarks,
-        session,
-      });
-
-      return { file, logEntry };
-    });
-
-    // Notify citizen via SMS on backtrack event
-    const smsResult = await sendSmsNotification({
-      file: result.file,
-      status: FILE_STATUSES.BACKTRACKED,
-      location: returnLocation,
-      notes: backtrackReason,
-    });
-
-    // Notify citizen via Email on backtrack event
-    const emailResult = await sendEmailNotification({
-      file: result.file,
-      status: FILE_STATUSES.BACKTRACKED,
-      location: returnLocation,
-      notes: backtrackReason,
-    });
-
-    return res.json({
-      success: true,
-      file: {
-        id: result.file._id,
-        fileUid: result.file.fileUid,
-        currentStatus: result.file.currentStatus,
-        currentLocation: result.file.currentLocation,
-      },
-      movement: {
-        actionType: result.logEntry.actionType,
-        backtrackReason: result.logEntry.backtrackReason,
-        timestamp: result.logEntry.timestamp,
-        entryHash: result.logEntry.entryHash,
-      },
-      smsNotified: smsResult?.success ?? false,
-      emailNotified: emailResult?.success ?? false,
-    });
-  } catch (err) {
-    if (err.message === 'File not found') {
-      return res.status(404).json({ error: 'File not found' });
-    }
-    if (err.message === 'File closed') {
-      return res.status(400).json({ error: 'This file is already closed. Closed files cannot be backtracked.' });
-    }
-    next(err);
-  }
-}
-
-/**
- * Search active files with filters.
- */
-export async function searchFiles(req, res, next) {
-  try {
-    const { q, status, wardCode, limit = 20 } = req.query;
-    const filter = { isClosed: false };
-
-    if (status) filter.currentStatus = status;
-    if (wardCode) filter.wardCode = wardCode;
-    else if (req.user.role === 'officer') filter.wardCode = req.user.wardCode;
-
-    if (q) {
-      const regex = new RegExp(q.trim(), 'i');
-      filter.$or = [
-        { fileUid: regex },
-        { trackingId: regex },
-        { citizenName: regex },
-        { title: regex },
-      ];
-    }
-
-    const files = await File.find(filter)
-      .select('fileUid trackingId title citizenName currentStatus currentLocation updatedAt')
-      .sort({ updatedAt: -1 })
-      .limit(Math.min(Number(limit), 50))
-      .lean();
-
-    return res.json({ success: true, files, count: files.length });
-  } catch (err) {
     next(err);
   }
 }
@@ -680,8 +675,8 @@ export async function searchFiles(req, res, next) {
 /**
  * Retrieve open files for the officer's inbox.
  * `scope=ward` (default) returns every open file in the officer's ward;
- * `scope=desk` narrows to files currently sitting at the officer's own desk
- * (powers the header notification bell). `limit` caps the result set.
+ * `scope=desk` narrows to files currently sitting at the officer's own desk;
+ * `scope=incoming` returns files currently in transit to the officer's desk.
  */
 export async function getOfficerInbox(req, res, next) {
   try {
@@ -689,15 +684,22 @@ export async function getOfficerInbox(req, res, next) {
     const { scope = 'ward', limit } = req.query;
 
     const filter = { wardCode, isClosed: false };
-    if (scope === 'desk') filter.currentLocation = req.user.deskLocation;
+    if (scope === 'desk') {
+      filter.currentLocation = req.user.deskLocation;
+      filter.currentStatus = { $ne: FILE_STATUSES.IN_TRANSIT };
+    } else if (scope === 'incoming') {
+      filter.targetLocation = req.user.deskLocation;
+      filter.currentStatus = FILE_STATUSES.IN_TRANSIT;
+    }
 
     let query = File.find(filter)
-      .select('fileUid trackingId title citizenName currentStatus currentLocation updatedAt createdAt')
+      .select('fileUid trackingId title citizenName currentStatus currentLocation targetLocation updatedAt createdAt')
       .sort({ updatedAt: -1 })
       .limit(Math.min(Number(limit) || 200, 200));
 
-    // Officer attribution only matters for the ward-wide queue view
-    if (scope !== 'desk') query = query.populate('assignedOfficerId', 'name deskLocation');
+    if (scope !== 'desk' && scope !== 'incoming') {
+      query = query.populate('assignedOfficerId', 'name deskLocation');
+    }
 
     const files = await query.lean();
 

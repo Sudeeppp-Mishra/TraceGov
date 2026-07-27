@@ -98,6 +98,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  receiveFile: (id, payload = {}) =>
+    request(`/files/${id}/receive`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   getOfficerInbox: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/files/inbox${qs ? `?${qs}` : ''}`);

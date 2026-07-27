@@ -1,5 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import {
   Container, Card, Button, Input, Badge, Icons, Skeleton, EmptyState, SectionLabel,
@@ -251,7 +250,11 @@ function StatusCard({ fileDetails, aiEstimate, autoRefresh, onAutoRefreshChange 
 }
 
 export default function CitizenTrackPage() {
-  const [trackingId, setTrackingId] = useState('');
+  const { id: pathId } = useParams();
+  const [searchParams] = useSearchParams();
+  const urlId = pathId || searchParams.get('id') || searchParams.get('trackingId');
+
+  const [trackingId, setTrackingId] = useState(urlId || '');
   const [fileDetails, setFileDetails] = useState(null);
   const [aiEstimate, setAiEstimate] = useState(null);
   const [error, setError] = useState('');
@@ -306,6 +309,14 @@ export default function CitizenTrackPage() {
       setLoading(false);
     }
   }, [saveSearchHistory]);
+
+  // Automatically track on page load if ID is provided in URL path or query params
+  useEffect(() => {
+    if (urlId) {
+      setTrackingId(urlId);
+      runTrack(urlId);
+    }
+  }, [urlId, runTrack]);
 
   const handleTrackSubmit = async (e) => {
     e.preventDefault();

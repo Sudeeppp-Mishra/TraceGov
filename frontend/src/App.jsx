@@ -43,6 +43,7 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/track" element={<CitizenTrackPage />} />
+        <Route path="/track/:id" element={<CitizenTrackPage />} />
 
         <Route
           path="/officer"

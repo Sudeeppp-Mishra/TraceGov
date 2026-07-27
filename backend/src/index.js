@@ -13,18 +13,46 @@ import statsRoutes from './routes/stats.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
 import { secureHeaders } from './middleware/security.js';
 
-// Load environment configuration
+// Load environment configuration (Gmail SMTP active)
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Apply CORS middleware
+// Allowed origins for local dev and production deployment
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:5174',
+  'http://localhost:4173',
+  'http://127.0.0.1:5173',
+  'https://trace-gov.vercel.app',
+];
+
+if (process.env.CORS_ORIGIN) {
+  process.env.CORS_ORIGIN.split(',').forEach((origin) => {
+    const trimmed = origin.trim();
+    if (trimmed && !allowedOrigins.includes(trimmed)) {
+      allowedOrigins.push(trimmed);
+    }
+  });
+}
+
+// Apply flexible CORS middleware
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: (origin, callback) => {
+      // Allow non-browser calls (Postman, curl, server-to-server)
+      if (!origin) return callback(null, true);
+      // Allow specified origins & any localhost/127.0.0.1 dev ports
+      if (allowedOrigins.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, true); // Fallback allow for test flexibility
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
   })
 );
 

@@ -2,9 +2,8 @@
  * Format HTML & Plaintext Email Templates for TraceGov File Status Updates.
  */
 export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, status, location, notes }) {
-  const trackingUrl = process.env.CORS_ORIGIN
-    ? `${process.env.CORS_ORIGIN}/track/${trackingId}`
-    : `https://tracegov.gov.np/track/${trackingId}`;
+  const origin = process.env.APP_URL || (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',')[0].trim() : 'http://localhost:5173');
+  const trackingUrl = `${origin.replace(/\/$/, '')}/track/${trackingId}`;
 
   let badgeColor = '#3b82f6'; // blue default
   let headerTitle = `Status Update: ${status}`;
@@ -128,7 +127,7 @@ export async function sendEmailNotification({ file, status, location, notes }) {
   let messageId = null;
 
   try {
-    // 1. If SMTP credentials exist (e.g. Gmail App Password or custom SMTP server)
+    // 1. If SMTP credentials exist (e.g. Gmail App Password - allows sending to ANY recipient!)
     if (smtpHost && smtpUser && smtpPass) {
       let nodemailer;
       try {
@@ -138,56 +137,42 @@ export async function sendEmailNotification({ file, status, location, notes }) {
       }
 
       if (nodemailer) {
-        const transporter = nodemailer.createTransport({
+        const port = Number(process.env.SMTP_PORT) || 587;
+        const secure = process.env.SMTP_SECURE === 'true' ? true : (process.env.SMTP_SECURE === 'false' ? false : port === 465);
+
+        const transporterOptions = {
           host: smtpHost,
-          port: Number(process.env.SMTP_PORT) || 587,
-          secure: process.env.SMTP_SECURE === 'true',
+          port,
+          secure,
           auth: {
             user: smtpUser,
             pass: smtpPass,
           },
-        });
+          tls: {
+            rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED === 'true',
+          },
+        };
+
+        const transporter = nodemailer.createTransport(transporterOptions);
 
         const info = await transporter.sendMail({
           from: smtpFrom,
           to: recipient,
+          replyTo: smtpUser,
           subject,
           text: textContent,
           html: htmlContent,
+          headers: {
+            'X-Application': 'TraceGov Municipal Portal',
+          },
         });
 
         deliveryStatus = 'sent';
         messageId = info.messageId;
         console.log(`[EMAIL SERVICE] Email dispatched via SMTP to ${recipient}. MessageID: ${info.messageId}`);
       }
-    } 
-    // 2. Resend API support if RESEND_API_KEY is configured
-    else if (process.env.RESEND_API_KEY) {
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: process.env.RESEND_FROM || 'TraceGov Alert <onboarding@resend.dev>',
-          to: [recipient],
-          subject,
-          html: htmlContent,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        deliveryStatus = 'sent';
-        messageId = data.id;
-        console.log(`[EMAIL SERVICE] Email dispatched via Resend to ${recipient}. ID: ${data.id}`);
-      } else {
-        const errData = await response.json();
-        console.error('[EMAIL SERVICE] Resend API error:', errData);
-      }
     }
-    // 3. Fallback: Log email details nicely for development mode
+    // 2. Fallback: Log email details nicely for development mode
     else {
       deliveryStatus = 'simulated';
       console.log('\n======================================================');

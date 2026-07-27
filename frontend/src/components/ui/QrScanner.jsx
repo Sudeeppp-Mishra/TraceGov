@@ -9,6 +9,12 @@ export function QrScanner({ isOpen, onClose, onScanSuccess }) {
   const [scannerInitializing, setScannerInitializing] = useState(false);
   const [scannerError, setScannerError] = useState('');
   const qrScannerRef = useRef(null);
+  const callbacksRef = useRef({ onClose, onScanSuccess });
+
+  // Update callbacksRef on every render without triggering effect re-run
+  useEffect(() => {
+    callbacksRef.current = { onClose, onScanSuccess };
+  });
 
   useEffect(() => {
     if (!isOpen) return;
@@ -17,9 +23,10 @@ export function QrScanner({ isOpen, onClose, onScanSuccess }) {
     setScannerInitializing(true);
 
     const timer = setTimeout(async () => {
-      let Html5Qrcode;
+      let Html5QrcodeModule;
       try {
-        ({ Html5Qrcode } = await import('html5-qrcode'));
+        const mod = await import('html5-qrcode');
+        Html5QrcodeModule = mod.Html5Qrcode;
       } catch {
         setScannerInitializing(false);
         setScannerError('Could not load camera scanner. Check your connection.');
@@ -27,7 +34,13 @@ export function QrScanner({ isOpen, onClose, onScanSuccess }) {
       }
 
       try {
-        const html5QrCode = new Html5Qrcode('qr-scanner-viewfinder');
+        const elem = document.getElementById('qr-scanner-viewfinder');
+        if (!elem) {
+          setScannerInitializing(false);
+          return;
+        }
+
+        const html5QrCode = new Html5QrcodeModule('qr-scanner-viewfinder');
         qrScannerRef.current = html5QrCode;
 
         // Detect mobile vs desktop webcam for scanned_via tagging
@@ -42,8 +55,8 @@ export function QrScanner({ isOpen, onClose, onScanSuccess }) {
               qrScannerRef.current.stop().catch(() => {});
               qrScannerRef.current = null;
             }
-            onClose();
-            onScanSuccess(decodedText, scanMode);
+            if (callbacksRef.current.onClose) callbacksRef.current.onClose();
+            if (callbacksRef.current.onScanSuccess) callbacksRef.current.onScanSuccess(decodedText, scanMode);
           },
           () => {}
         );
@@ -61,7 +74,7 @@ export function QrScanner({ isOpen, onClose, onScanSuccess }) {
         qrScannerRef.current = null;
       }
     };
-  }, [isOpen, onClose, onScanSuccess]);
+  }, [isOpen]);
 
   const handleClose = () => {
     if (qrScannerRef.current) {

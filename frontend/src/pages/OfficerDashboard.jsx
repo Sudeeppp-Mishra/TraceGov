@@ -45,6 +45,48 @@ export default function OfficerDashboard() {
   const [aiDelayReport, setAiDelayReport] = useState(null);
   const [aiBacktrackSuggest, setAiBacktrackSuggest] = useState(null);
 
+  const handleSelectFile = async (identifier, scanMode = 'manual') => {
+    try {
+      setFileLoading(true);
+      const data = await api.scanFile(identifier);
+      setSelectedFile(data.file);
+      setSelectedFileHistory(data.recentHistory || []);
+      setIsAuditValid(data.auditChainValid);
+      setScannedVia(scanMode);
+      setAiDelayReport(null); setAiBacktrackSuggest(null);
+
+      // Closed files only expose the AI/history view — no routing tabs.
+      setActionTab(['Dispatched', 'Approved', 'Rejected'].includes(data.file.currentStatus) ? 'ai' : 'forward');
+      setSearchQuery(''); setSearchResults([]); setActiveResultIndex(-1);
+      return data.file;
+    } catch (err) {
+      toast.error(err.message || 'Error loading file.');
+      return null;
+    } finally {
+      setFileLoading(false);
+    }
+  };
+
+  const loadDashboard = async (wardCode) => {
+    try {
+      setLoading(true);
+      const [summary, deptsData, incomingData] = await Promise.all([
+        api.dashboardSummary({ wardCode }),
+        api.getDepartments().catch(() => ({ departments: [] })),
+        api.getOfficerInbox({ scope: 'incoming' }).catch(() => ({ files: [] })),
+      ]);
+      setMetrics(summary.metrics);
+      setDepartmentQueue(summary.departmentQueue || []);
+      setRecentHistory(summary.recentHistory || []);
+      setDepartmentsList(deptsData.departments || []);
+      setIncomingFiles(incomingData.files || []);
+    } catch (err) {
+      toast.error('Failed to load dashboard metrics.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     const user = getStoredUser();
     if (!user) { navigate('/login'); return; }
@@ -69,26 +111,6 @@ export default function OfficerDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadDashboard = async (wardCode) => {
-    try {
-      setLoading(true);
-      const [summary, deptsData, incomingData] = await Promise.all([
-        api.dashboardSummary({ wardCode }),
-        api.getDepartments().catch(() => ({ departments: [] })),
-        api.getOfficerInbox({ scope: 'incoming' }).catch(() => ({ files: [] })),
-      ]);
-      setMetrics(summary.metrics);
-      setDepartmentQueue(summary.departmentQueue || []);
-      setRecentHistory(summary.recentHistory || []);
-      setDepartmentsList(deptsData.departments || []);
-      setIncomingFiles(incomingData.files || []);
-    } catch (err) {
-      toast.error('Failed to load dashboard metrics.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
     if (!searchQuery.trim()) { setSearchResults([]); setSearching(false); setActiveResultIndex(-1); return; }
     setSearching(true);
@@ -101,28 +123,6 @@ export default function OfficerDashboard() {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
-
-  const handleSelectFile = async (identifier, scanMode = 'manual') => {
-    try {
-      setFileLoading(true);
-      const data = await api.scanFile(identifier);
-      setSelectedFile(data.file);
-      setSelectedFileHistory(data.recentHistory || []);
-      setIsAuditValid(data.auditChainValid);
-      setScannedVia(scanMode);
-      setAiDelayReport(null); setAiBacktrackSuggest(null);
-
-      // Closed files only expose the AI/history view — no routing tabs.
-      setActionTab(['Dispatched', 'Approved', 'Rejected'].includes(data.file.currentStatus) ? 'ai' : 'forward');
-      setSearchQuery(''); setSearchResults([]); setActiveResultIndex(-1);
-      return data.file;
-    } catch (err) {
-      toast.error(err.message || 'Error loading file.');
-      return null;
-    } finally {
-      setFileLoading(false);
-    }
-  };
 
   const handleSearchKeyDown = (e) => {
     if (searchResults.length === 0) return;

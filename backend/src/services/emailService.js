@@ -94,8 +94,119 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
 }
 
 /**
- * Send real email notification to citizen.
- * Supports SMTP (Gmail / Custom), Resend API, or Ethereal/Console fallback.
+ * Build an ordered list of email providers from environment variables.
+ * Brevo HTTP API is prioritized first (works on Render — port 443).
+ * Gmail SMTP second (works on localhost and hosts that allow SMTP ports).
+ * Only providers with required credentials are included.
+ */
+function buildProviderChain() {
+  const providers = [];
+
+  // Provider 1: Brevo HTTP API (Primary — uses HTTPS port 443, works on Render!)
+  if (process.env.BREVO_API_KEY) {
+    providers.push({
+      name: 'Brevo HTTP API',
+      type: 'http',
+      apiKey: process.env.BREVO_API_KEY,
+      senderName: process.env.BREVO_SENDER_NAME || 'TraceGov Alert',
+      senderEmail: process.env.BREVO_SENDER_EMAIL || process.env.SMTP_USER || 'noreply@tracegov.gov.np',
+    });
+  }
+
+  // Provider 2: Gmail SMTP (Fallback — works on localhost and cloud hosts that allow SMTP)
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    const port = Number(process.env.SMTP_PORT) || 587;
+    providers.push({
+      name: `Gmail SMTP (${process.env.SMTP_HOST}:${port})`,
+      type: 'smtp',
+      host: process.env.SMTP_HOST,
+      port,
+      secure: process.env.SMTP_SECURE !== undefined ? process.env.SMTP_SECURE === 'true' : port === 465,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+      from: process.env.SMTP_FROM || `"TraceGov Alert" <${process.env.SMTP_USER}>`,
+    });
+  }
+
+  return providers;
+}
+
+/**
+ * Send email via Brevo HTTP API (POST https://api.brevo.com/v3/smtp/email).
+ * Uses HTTPS port 443 — never blocked by cloud hosts like Render.
+ */
+async function attemptBrevoHttpSend(provider, { recipient, subject, htmlContent }) {
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json',
+      'api-key': provider.apiKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { name: provider.senderName, email: provider.senderEmail },
+      to: [{ email: recipient }],
+      subject,
+      htmlContent,
+    }),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    throw new Error(`Brevo API ${response.status}: ${errBody}`);
+  }
+
+  const data = await response.json();
+  return { success: true, messageId: data.messageId || data.messageIds?.[0] || 'brevo-ok' };
+}
+
+/**
+ * Send email via SMTP (nodemailer). Works on localhost and SMTP-friendly hosts.
+ */
+async function attemptSmtpSend(provider, { recipient, subject, textContent, htmlContent, replyTo }) {
+  const nodemailer = await import('nodemailer');
+
+  const transporter = nodemailer.createTransport({
+    host: provider.host,
+    port: provider.port,
+    secure: provider.secure,
+    family: 4, // Force IPv4 (avoids cloud IPv6 ENETUNREACH errors)
+    connectionTimeout: 12000,
+    greetingTimeout: 12000,
+    socketTimeout: 15000,
+    auth: provider.auth,
+    tls: {
+      rejectUnauthorized: false,
+      servername: provider.host,
+    },
+  });
+
+  const info = await transporter.sendMail({
+    from: provider.from,
+    to: recipient,
+    replyTo: replyTo || provider.auth.user,
+    subject,
+    text: textContent,
+    html: htmlContent,
+    headers: {
+      'X-Application': 'TraceGov Municipal Portal',
+    },
+  });
+
+  return { success: true, messageId: info.messageId };
+}
+
+/**
+ * Send email notification to citizen.
+ * Multi-provider with automatic fallback:
+ *   1. Brevo SMTP (primary, production-optimized)
+ *   2. Gmail SMTP (fallback, works everywhere)
+ *   3. Console log (development simulation)
+ *
+ * The provider chain is built dynamically from available .env variables,
+ * so no code changes are needed when switching environments.
  */
 export async function sendEmailNotification({ file, status, location, notes }) {
   const enabled = process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false';
@@ -118,85 +229,64 @@ export async function sendEmailNotification({ file, status, location, notes }) {
   });
 
   const recipient = file.citizenEmail;
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  const smtpFrom = process.env.SMTP_FROM || `"TraceGov Alert" <${smtpUser || 'noreply@tracegov.gov.np'}>`;
+  const providers = buildProviderChain();
 
   let deliveryStatus = 'simulated';
   let messageId = null;
+  let usedProvider = null;
 
-  try {
-    // 1. If SMTP credentials exist (e.g. Gmail App Password - allows sending to ANY recipient!)
-    if (smtpHost && smtpUser && smtpPass) {
-      let nodemailer;
-      try {
-        nodemailer = await import('nodemailer');
-      } catch (importErr) {
-        console.warn('[EMAIL SERVICE] nodemailer package not installed, attempting fetch relay');
-      }
+  // Try each provider in order; stop at the first success
+  for (const provider of providers) {
+    try {
+      console.log(`[EMAIL SERVICE] Attempting delivery via ${provider.name} to ${recipient}...`);
 
-      if (nodemailer) {
-        const port = Number(process.env.SMTP_PORT) || 465;
-        const secure = process.env.SMTP_SECURE !== undefined ? process.env.SMTP_SECURE === 'true' : port === 465;
-
-        const transporterOptions = {
-          host: smtpHost,
-          port,
-          secure,
-          family: 4, // Force IPv4 address resolution (fixes Render cloud IPv6 ENETUNREACH error)
-          connectionTimeout: 15000,
-          greetingTimeout: 15000,
-          socketTimeout: 15000,
-          auth: {
-            user: smtpUser,
-            pass: smtpPass,
-          },
-          tls: {
-            rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED === 'true',
-            servername: smtpHost,
-          },
-        };
-
-        const transporter = nodemailer.createTransport(transporterOptions);
-
-        const info = await transporter.sendMail({
-          from: smtpFrom,
-          to: recipient,
-          replyTo: smtpUser,
+      let result;
+      if (provider.type === 'http') {
+        result = await attemptBrevoHttpSend(provider, { recipient, subject, htmlContent });
+      } else {
+        result = await attemptSmtpSend(provider, {
+          recipient,
           subject,
-          text: textContent,
-          html: htmlContent,
-          headers: {
-            'X-Application': 'TraceGov Municipal Portal',
-          },
+          textContent,
+          htmlContent,
+          replyTo: process.env.SMTP_USER,
         });
-
-        deliveryStatus = 'sent';
-        messageId = info.messageId;
-        console.log(`[EMAIL SERVICE] Email dispatched via SMTP to ${recipient}. MessageID: ${info.messageId}`);
       }
+
+      deliveryStatus = 'sent';
+      messageId = result.messageId;
+      usedProvider = provider.name;
+      console.log(`[EMAIL SERVICE] ✅ Email dispatched via ${provider.name} to ${recipient}. MessageID: ${result.messageId}`);
+      break; // Success — stop trying other providers
+
+    } catch (err) {
+      const reason = err.code || err.message || 'unknown';
+      console.warn(`[EMAIL SERVICE] ⚠️ ${provider.name} failed (${reason}). ${providers.indexOf(provider) < providers.length - 1 ? 'Trying next provider...' : 'No more providers to try.'}`);
     }
-    // 2. Fallback: Log email details nicely for development mode
-    else {
+  }
+
+  // Fallback: No providers available or all failed — log to console for development
+  if (deliveryStatus !== 'sent') {
+    if (providers.length === 0) {
       deliveryStatus = 'simulated';
       console.log('\n======================================================');
-      console.log(`📧 [EMAIL NOTIFICATION DISPATCHED TO ${recipient}]`);
+      console.log(`📧 [EMAIL NOTIFICATION SIMULATED TO ${recipient}]`);
       console.log(`Recipient : ${file.citizenName} <${recipient}>`);
       console.log(`Subject   : ${subject}`);
       console.log(`Status    : ${status || file.currentStatus} @ ${location || file.currentLocation}`);
-      console.log('Notice    : Configure SMTP_HOST, SMTP_USER, SMTP_PASS in .env to deliver real emails to inbox.');
+      console.log('Notice    : Configure BREVO_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASS in .env to deliver real emails.');
       console.log('======================================================\n');
+    } else {
+      deliveryStatus = 'failed';
+      console.error(`[EMAIL SERVICE] ❌ All ${providers.length} provider(s) failed for ${recipient}. Email was not delivered.`);
     }
-  } catch (err) {
-    deliveryStatus = 'failed';
-    console.error('[EMAIL SERVICE] Error dispatching email:', err);
   }
 
   return {
-    success: deliveryStatus !== 'failed',
+    success: deliveryStatus === 'sent',
     deliveryStatus,
     recipientEmail: recipient,
     messageId,
+    provider: usedProvider,
   };
 }

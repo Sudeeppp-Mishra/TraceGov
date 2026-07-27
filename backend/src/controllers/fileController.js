@@ -690,6 +690,11 @@ export async function getOfficerInbox(req, res, next) {
     } else if (scope === 'incoming') {
       filter.targetLocation = req.user.deskLocation;
       filter.currentStatus = FILE_STATUSES.IN_TRANSIT;
+    } else if (scope === 'bell' || scope === 'all_desk') {
+      filter.$or = [
+        { currentLocation: req.user.deskLocation, currentStatus: { $ne: FILE_STATUSES.IN_TRANSIT } },
+        { targetLocation: req.user.deskLocation, currentStatus: FILE_STATUSES.IN_TRANSIT },
+      ];
     }
 
     let query = File.find(filter)

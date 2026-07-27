@@ -144,12 +144,14 @@ export async function sendEmailNotification({ file, status, location, notes }) {
           host: smtpHost,
           port,
           secure,
+          family: 4, // Force IPv4 address resolution (fixes Render cloud IPv6 ENETUNREACH error)
           auth: {
             user: smtpUser,
             pass: smtpPass,
           },
           tls: {
             rejectUnauthorized: process.env.SMTP_REJECT_UNAUTHORIZED === 'true',
+            servername: smtpHost,
           },
         };
 

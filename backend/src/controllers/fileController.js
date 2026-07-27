@@ -673,6 +673,40 @@ export async function receiveFile(req, res, next) {
 }
 
 /**
+ * Search active files with filters.
+ */
+export async function searchFiles(req, res, next) {
+  try {
+    const { q, status, wardCode, limit = 20 } = req.query;
+    const filter = { isClosed: false };
+
+    if (status) filter.currentStatus = status;
+    if (wardCode) filter.wardCode = wardCode;
+    else if (req.user.role === 'officer') filter.wardCode = req.user.wardCode;
+
+    if (q) {
+      const regex = new RegExp(q.trim(), 'i');
+      filter.$or = [
+        { fileUid: regex },
+        { trackingId: regex },
+        { citizenName: regex },
+        { title: regex },
+      ];
+    }
+
+    const files = await File.find(filter)
+      .select('fileUid trackingId title citizenName currentStatus currentLocation updatedAt')
+      .sort({ updatedAt: -1 })
+      .limit(Math.min(Number(limit), 50))
+      .lean();
+
+    return res.json({ success: true, files, count: files.length });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * Retrieve open files for the officer's inbox.
  * `scope=ward` (default) returns every open file in the officer's ward;
  * `scope=desk` narrows to files currently sitting at the officer's own desk;

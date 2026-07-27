@@ -55,7 +55,10 @@ export default function OfficerInbox() {
   );
   const list = tab === 'desk' ? atMyDesk : tab === 'incoming' ? incomingFiles : needsAttention;
 
-  const openFile = (fileUid) => navigate(`/officer?file=${encodeURIComponent(fileUid)}`);
+  const openFile = (file) => {
+    const actionParam = file.currentStatus === 'In Transit' ? '&action=receive' : '';
+    navigate(`/officer?file=${encodeURIComponent(file.fileUid)}${actionParam}`);
+  };
 
   const TABS = [
     { id: 'desk', label: `My desk (${atMyDesk.length})`, icon: Icons.Folder },
@@ -89,7 +92,7 @@ export default function OfficerInbox() {
                 {list.map((file) => (
                   <button
                     key={file.fileUid}
-                    onClick={() => openFile(file.fileUid)}
+                    onClick={() => openFile(file)}
                     className="group flex w-full items-center gap-4 rounded-2xl border border-border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:border-border-strong hover:shadow-[0_12px_30px_-16px_rgba(15,31,54,0.2)] cursor-pointer"
                   >
                     <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted text-primary">

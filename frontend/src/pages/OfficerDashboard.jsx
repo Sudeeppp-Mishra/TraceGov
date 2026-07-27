@@ -55,9 +55,15 @@ export default function OfficerDashboard() {
   // Read URL query parameter for file selection on page load
   useEffect(() => {
     const fileIdParam = searchParams.get('file');
+    const actionParam = searchParams.get('action');
     if (fileIdParam) {
-      handleSelectFile(fileIdParam);
+      handleSelectFile(fileIdParam).then((file) => {
+        if (actionParam === 'receive' || file?.currentStatus === 'In Transit') {
+          setIsScannerOpen(true);
+        }
+      });
       searchParams.delete('file');
+      searchParams.delete('action');
       setSearchParams(searchParams, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,8 +115,10 @@ export default function OfficerDashboard() {
       // Closed files only expose the AI/history view — no routing tabs.
       setActionTab(['Dispatched', 'Approved', 'Rejected'].includes(data.file.currentStatus) ? 'ai' : 'forward');
       setSearchQuery(''); setSearchResults([]); setActiveResultIndex(-1);
+      return data.file;
     } catch (err) {
       toast.error(err.message || 'Error loading file.');
+      return null;
     } finally {
       setFileLoading(false);
     }
@@ -205,8 +213,11 @@ export default function OfficerDashboard() {
     } finally { setActionLoading(false); }
   };
 
-  const handleScanSuccess = (decodedText, scanMode) => {
-    handleSelectFile(decodedText, scanMode);
+  const handleScanSuccess = async (decodedText, scanMode) => {
+    const file = await handleSelectFile(decodedText, scanMode);
+    if (file && file.currentStatus === 'In Transit') {
+      await handleReceiveFile({ scannedVia: scanMode, remarks: '' });
+    }
   };
 
   // Closed files (dispatched, approved, rejected) are archived — no further
@@ -215,23 +226,20 @@ export default function OfficerDashboard() {
   const isFileClosed = selectedFile && CLOSED_STATUSES.includes(selectedFile.currentStatus);
 
   const tabs = useMemo(() => (
-    isFileClosed
-      ? [{ id: 'ai', label: 'AI Check', icon: Icons.Sparkles }]
-      : [
-          { id: 'forward', label: 'Forward', icon: Icons.ArrowRight },
-          { id: 'backtrack', label: 'Backtrack', icon: Icons.ArrowLeft },
-          { id: 'ai', label: 'AI Check', icon: Icons.Sparkles },
-        ]
-  ), [isFileClosed]);
+    [
+      { id: 'forward', label: 'Forward file', icon: Icons.ArrowRight },
+      { id: 'backtrack', label: 'Backtrack / Return', icon: Icons.Undo },
+      { id: 'ai', label: 'AI congestion analysis', icon: Icons.Sparkles },
+    ]
+  ), []);
 
   return (
     <AppShell user={currentUser}>
-      <Container size="wide" className="space-y-8 pt-8">
+      <Container size="wide" className="space-y-6 pt-8">
         <PageHeading
-          breadcrumbs={['Workspace']}
+          breadcrumbs={['Workspace', 'Overview']}
           title="Officer workspace"
           description="Search, scan and route physical files across ward desks with a full audit trail."
-          actions={<Button variant="primary" onClick={() => navigate('/register-file')}><Icons.Plus className="h-4 w-4" /> Register file</Button>}
         />
 
         {/* Metrics */}
@@ -273,7 +281,10 @@ export default function OfficerDashboard() {
                       <Button
                         size="sm"
                         variant="primary"
-                        onClick={() => handleSelectFile(file.fileUid)}
+                        onClick={() => {
+                          handleSelectFile(file.fileUid);
+                          setIsScannerOpen(true);
+                        }}
                         className="shrink-0"
                       >
                         <Icons.Scan className="h-3.5 w-3.5" /> Confirm Receipt

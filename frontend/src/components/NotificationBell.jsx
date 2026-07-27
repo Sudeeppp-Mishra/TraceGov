@@ -17,7 +17,7 @@ export function NotificationBell() {
 
   const refresh = useCallback(() => {
     api
-      .getOfficerInbox({ scope: 'desk', limit: 8 })
+      .getOfficerInbox({ scope: 'bell', limit: 30 })
       .then((data) => {
         setFiles(data.files || []);
         setCount(data.count || 0);
@@ -25,11 +25,12 @@ export function NotificationBell() {
       .catch(() => {}); // badge is best-effort; never surface polling errors
   }, []);
 
-  usePolling(refresh, 60000);
+  usePolling(refresh, 30000);
 
-  const openFile = (fileUid) => {
+  const openFile = (file) => {
     setOpen(false);
-    navigate(`/officer?file=${encodeURIComponent(fileUid)}`);
+    const actionQuery = file.currentStatus === 'In Transit' ? '&action=receive' : '';
+    navigate(`/officer?file=${encodeURIComponent(file.fileUid)}${actionQuery}`);
   };
 
   return (
@@ -40,7 +41,7 @@ export function NotificationBell() {
         setOpen(next);
         if (next) refresh(); // never show a stale list on click
       }}
-      className="w-80"
+      className="w-84"
       trigger={(props) => (
         <button
           type="button"
@@ -51,47 +52,56 @@ export function NotificationBell() {
           <Icons.Bell className="h-4.5 w-4.5" />
           {count > 0 && (
             <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-              {count > 9 ? '9+' : count}
+              {count > 99 ? '99+' : count}
             </span>
           )}
         </button>
       )}
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <p className="text-sm font-semibold text-foreground">Pending at your desk</p>
-        <span className="text-xs font-medium text-muted-foreground">{count} file{count === 1 ? '' : 's'}</span>
+        <p className="text-sm font-semibold text-foreground">Desk & Incoming Notifications</p>
+        <span className="text-xs font-semibold text-primary">{count} file{count === 1 ? '' : 's'}</span>
       </div>
 
       {files.length === 0 ? (
-        <p className="px-4 py-6 text-center text-sm text-muted-foreground">Your desk is clear.</p>
+        <p className="px-4 py-6 text-center text-sm text-muted-foreground">No active or incoming files.</p>
       ) : (
-        <ul className="max-h-80 overflow-y-auto">
-          {files.map((f) => (
-            <li key={f.fileUid}>
-              <button
-                type="button"
-                onClick={() => openFile(f.fileUid)}
-                className="flex w-full flex-col gap-1 border-b border-border px-4 py-3 text-left transition-colors hover:bg-muted/60 cursor-pointer"
-              >
-                <span className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium text-foreground">{f.title}</span>
-                  <Badge status={f.currentStatus} />
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  <span className="font-mono">{f.fileUid}</span> · {dwellLabel(f.updatedAt)} at your desk
-                </span>
-              </button>
-            </li>
-          ))}
+        <ul className="max-h-80 overflow-y-auto divide-y divide-border">
+          {files.map((f) => {
+            const isInTransit = f.currentStatus === 'In Transit';
+            return (
+              <li key={f.fileUid}>
+                <button
+                  type="button"
+                  onClick={() => openFile(f)}
+                  className="flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors hover:bg-muted/60 cursor-pointer"
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-semibold text-foreground">{f.title}</span>
+                    <Badge status={isInTransit ? 'In Transit' : f.currentStatus} />
+                  </span>
+                  <span className="text-xs text-muted-foreground flex items-center justify-between gap-2">
+                    <span className="font-mono text-muted-foreground">{f.fileUid}</span>
+                    <span>{isInTransit ? `Incoming from ${f.currentLocation}` : `${dwellLabel(f.updatedAt)} at desk`}</span>
+                  </span>
+                  {isInTransit && (
+                    <span className="text-[11px] font-medium text-primary flex items-center gap-1 mt-0.5">
+                      <Icons.Scan className="h-3 w-3" /> Click to scan & confirm receipt
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 
       <Link
         to="/inbox"
         onClick={() => setOpen(false)}
-        className="flex items-center justify-center gap-1.5 px-4 py-3 text-sm font-semibold text-primary transition-colors hover:bg-muted/60"
+        className="flex items-center justify-center gap-1.5 px-4 py-3 text-sm font-semibold text-primary transition-colors hover:bg-muted/60 border-t border-border"
       >
-        View inbox <Icons.ArrowRight className="h-4 w-4" />
+        View full inbox <Icons.ArrowRight className="h-4 w-4" />
       </Link>
     </Popover>
   );

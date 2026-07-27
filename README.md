@@ -29,8 +29,8 @@
 </div>
 
 > [!NOTE]
-> **Project Status: Initial Setup & Design Phase**  
-> This project has just been initialized. Coding has not yet started, and we are currently setting up the structure, configuration, and planning stages.
+> **Improvement Phase**  
+> This project is under improvement phase.
 
 ---
 

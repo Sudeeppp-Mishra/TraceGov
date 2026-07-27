@@ -1,3 +1,5 @@
+import mongoose from 'mongoose';
+
 /**
  * Format HTML & Plaintext Email Templates for TraceGov File Status Updates.
  */
@@ -5,90 +7,144 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
   const origin = process.env.APP_URL || (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',')[0].trim() : 'http://localhost:5173');
   const trackingUrl = `${origin.replace(/\/$/, '')}/track/${trackingId}`;
 
-  let badgeColor = '#3b82f6'; // blue default
-  let headerTitle = `Status Update: ${status}`;
-  let statusBanner = `File status has been updated to <strong>${status}</strong> at <strong>${location}</strong>.`;
+  // Status palette matches the app's own design tokens - amber for routine
+  // friction (Backtracked), not red. Red is reserved for a genuine negative
+  // outcome (Rejected) only.
+  const STATUS_STYLES = {
+    Received: {
+      accent: '#0F9D74',
+      bg: '#E7F5F0',
+      headerTitle: 'File registered',
+      banner: (loc) => `Your file has been registered at <strong>${loc}</strong>. We'll notify you as it moves.`,
+    },
+    Approved: {
+      accent: '#1F7A5C',
+      bg: '#E5F2ED',
+      headerTitle: 'File approved',
+      banner: (loc) => `Your file has been approved at <strong>${loc}</strong>.`,
+    },
+    Dispatched: {
+      accent: '#1F7A5C',
+      bg: '#E5F2ED',
+      headerTitle: 'File dispatched',
+      banner: (loc) => `Your file has been completed and dispatched to <strong>${loc}</strong>.`,
+    },
+    Backtracked: {
+      accent: '#B8790A',
+      bg: '#FBF1E1',
+      headerTitle: 'One thing needs your attention',
+      banner: (loc) => `Your file was sent back for a correction at <strong>${loc}</strong>.`,
+    },
+    Rejected: {
+      accent: '#C1442E',
+      bg: '#FBEAE6',
+      headerTitle: 'File rejected',
+      banner: (loc) => `Your file was rejected at <strong>${loc}</strong>.`,
+    },
+  };
 
-  if (status === 'Received') {
-    badgeColor = '#10b981'; // green
-    headerTitle = 'File Registered Successfully';
-    statusBanner = `Your physical file has been registered at desk: <strong>${location}</strong>.`;
-  } else if (status === 'Approved') {
-    badgeColor = '#059669'; // dark green
-    headerTitle = '🎉 File Approved!';
-    statusBanner = `Great news! Your file has been <strong>APPROVED</strong> at <strong>${location}</strong>.`;
-  } else if (status === 'Backtracked') {
-    badgeColor = '#ef4444'; // red
-    headerTitle = '⚠️ Action Required: File Returned';
-    statusBanner = `Your file has been returned for correction at desk <strong>${location}</strong>.${notes ? `<br><br><strong>Reason:</strong> ${notes}` : ''}`;
-  } else if (status === 'Rejected') {
-    badgeColor = '#dc2626'; // dark red
-    headerTitle = 'Notice: File Rejected';
-    statusBanner = `Your file was rejected at <strong>${location}</strong>.${notes ? `<br><br><strong>Reason:</strong> ${notes}` : ''}`;
-  } else if (status === 'Dispatched') {
-    badgeColor = '#6366f1'; // indigo
-    headerTitle = 'File Dispatched';
-    statusBanner = `Your file has been completed and dispatched to <strong>${location}</strong>.`;
-  }
+  const style = STATUS_STYLES[status] || {
+    accent: '#2F6FED',
+    bg: '#EAF1FE',
+    headerTitle: `Status update: ${status}`,
+    banner: (loc) => `Your file's status has been updated to <strong>${status}</strong> at <strong>${loc}</strong>.`,
+  };
 
-  const subject = `[TraceGov] ${headerTitle} - "${title}" (${fileUid})`;
+  const bannerText = style.banner(location) + (notes ? `<br><br><strong>Note:</strong> ${notes}` : '');
+  const preheaderText = `${style.headerTitle} — ${title} is now at ${location}.`;
+
+  const subject = `TraceGov: ${style.headerTitle} · ${fileUid}`;
 
   const htmlContent = `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
-    .container { max-width: 600px; margin: 0 auto; background-color: #1e293b; border-radius: 16px; border: 1px solid #334155; overflow: hidden; }
-    .header { background-color: #0f172a; padding: 24px; text-align: center; border-bottom: 1px solid #334155; }
-    .brand { font-size: 20px; font-weight: 800; color: #38bdf8; letter-spacing: -0.5px; }
-    .content { padding: 32px 24px; }
-    .badge { display: inline-block; padding: 6px 16px; border-radius: 9999px; background-color: ${badgeColor}; color: #ffffff; font-weight: 700; font-size: 14px; margin-bottom: 16px; }
-    .title { font-size: 22px; font-weight: 700; color: #f8fafc; margin-top: 0; margin-bottom: 12px; }
-    .banner { background-color: #0f172a; border-left: 4px solid ${badgeColor}; padding: 16px; border-radius: 8px; margin: 20px 0; font-size: 15px; line-height: 1.6; color: #e2e8f0; }
-    .details-box { background-color: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin: 24px 0; }
-    .detail-row { display: flex; justify-content: space-between; border-bottom: 1px solid #1e293b; padding: 10px 0; font-size: 14px; }
-    .detail-row:last-child { border-bottom: none; }
-    .detail-label { color: #94a3b8; font-weight: 600; }
-    .detail-val { color: #f8fafc; font-weight: 700; font-mono: monospace; }
-    .btn { display: block; text-align: center; background-color: #0284c7; color: #ffffff !important; text-decoration: none; padding: 14px 24px; border-radius: 10px; font-weight: 700; font-size: 15px; margin-top: 28px; }
-    .footer { text-align: center; padding: 20px; font-size: 12px; color: #64748b; border-top: 1px solid #334155; background-color: #0f172a; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      <div class="brand">TraceGov Municipal Tracking</div>
-    </div>
-    <div class="content">
-      <div class="badge">${status}</div>
-      <h1 class="title">${headerTitle}</h1>
-      <p style="color: #94a3b8; font-size: 15px; margin-bottom: 20px;">Namaste ${citizenName}, here is the latest update regarding your physical file.</p>
-      
-      <div class="banner">
-        ${statusBanner}
-      </div>
+<body style="margin:0; padding:0; background-color:#FAFAF9; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">${preheaderText}</div>
 
-      <div class="details-box">
-        <div class="detail-row"><span class="detail-label">File Title</span><span class="detail-val">${title}</span></div>
-        <div class="detail-row"><span class="detail-label">File UID</span><span class="detail-val">${fileUid}</span></div>
-        <div class="detail-row"><span class="detail-label">Tracking ID</span><span class="detail-val">${trackingId}</span></div>
-        <div class="detail-row"><span class="detail-label">Current Desk</span><span class="detail-val">${location}</span></div>
-      </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAFAF9;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px; width:100%; background-color:#FFFFFF; border:1px solid #E7E8EA; border-radius:12px; overflow:hidden;">
 
-      <a href="${trackingUrl}" class="btn">Track File Live on TraceGov Portal →</a>
-    </div>
-    <div class="footer">
-      Automated update from Municipal Public Governance System · TraceGov<br>
-      You are receiving this because your email was registered for file tracking.
-    </div>
-  </div>
+          <!-- Header -->
+          <tr>
+            <td style="padding:24px 32px; border-bottom:1px solid #E7E8EA;">
+              <span style="font-size:16px; font-weight:600; color:#14171A; letter-spacing:-0.2px;">TraceGov</span>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px;">
+              <span style="display:inline-block; padding:4px 12px; border-radius:999px; background-color:${style.bg}; color:${style.accent}; font-weight:600; font-size:13px; margin-bottom:16px;">
+                ${status}
+              </span>
+
+              <h1 style="font-size:20px; font-weight:600; color:#14171A; margin:12px 0 8px;">${style.headerTitle}</h1>
+              <p style="font-size:14px; color:#5B6168; margin:0 0 20px; line-height:1.5;">Namaste ${citizenName}, here's the latest on your file.</p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAFAF9; border:1px solid #E7E8EA; border-left:3px solid ${style.accent}; border-radius:8px; margin-bottom:24px;">
+                <tr>
+                  <td style="padding:16px; font-size:14px; color:#14171A; line-height:1.6;">
+                    ${bannerText}
+                  </td>
+                </tr>
+              </table>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E8EA; border-radius:8px; margin-bottom:28px;">
+                <tr>
+                  <td style="padding:12px 16px; border-bottom:1px solid #E7E8EA; font-size:13px; color:#9299A1;">File</td>
+                  <td style="padding:12px 16px; border-bottom:1px solid #E7E8EA; font-size:13px; color:#14171A; text-align:right;">${title}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 16px; border-bottom:1px solid #E7E8EA; font-size:13px; color:#9299A1;">File UID</td>
+                  <td style="padding:12px 16px; border-bottom:1px solid #E7E8EA; font-size:13px; color:#14171A; text-align:right; font-family:'SFMono-Regular', Consolas, Menlo, monospace;">${fileUid}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 16px; border-bottom:1px solid #E7E8EA; font-size:13px; color:#9299A1;">Tracking ID</td>
+                  <td style="padding:12px 16px; border-bottom:1px solid #E7E8EA; font-size:13px; color:#14171A; text-align:right; font-family:'SFMono-Regular', Consolas, Menlo, monospace;">${trackingId}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 16px; font-size:13px; color:#9299A1;">Current desk</td>
+                  <td style="padding:12px 16px; font-size:13px; color:#14171A; text-align:right;">${location}</td>
+                </tr>
+              </table>
+
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center" style="border-radius:8px; background-color:#2F6FED;">
+                    <a href="${trackingUrl}" style="display:block; padding:13px 24px; font-size:14px; font-weight:600; color:#FFFFFF; text-decoration:none;">
+                      Track this file
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:20px 32px; border-top:1px solid #E7E8EA; background-color:#FAFAF9;">
+              <p style="font-size:12px; color:#9299A1; margin:0; line-height:1.5;">
+                Automated update from TraceGov, a citizen file-tracking service.<br>
+                Sent because this email is registered for updates on this file.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
   `;
 
-  const textContent = `[TraceGov Alert] Namaste ${citizenName}, status for "${title}" (${fileUid}) updated to ${status} at ${location}. Track live: ${trackingUrl}`;
+  const textContent = `TraceGov — ${style.headerTitle}\n\n${title} (${fileUid})\nTracking ID: ${trackingId}\nStatus: ${status} at ${location}${notes ? `\nNote: ${notes}` : ''}\n\nTrack this file: ${trackingUrl}`;
 
   return { subject, htmlContent, textContent };
 }

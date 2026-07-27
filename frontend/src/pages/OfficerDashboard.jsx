@@ -5,6 +5,7 @@ import { api, getStoredUser } from '../lib/api';
 import {
   Container, Card, Button, Input, Select, Textarea, Badge, Modal, Icons,
   StatCard, Skeleton, EmptyState, Timeline, TimelineItem, useToast, Spinner, Tabs,
+  QrScanner, FileActions,
 } from '../components/ui';
 import { AppShell, PageHeading } from '../components/layout';
 
@@ -26,6 +27,10 @@ export default function OfficerDashboard() {
   const [selectedFileHistory, setSelectedFileHistory] = useState([]);
   const [isAuditValid, setIsAuditValid] = useState(true);
 
+  // Track verification method: 'webcam' | 'mobile' | 'manual'
+  const [scannedVia, setScannedVia] = useState('manual');
+  const [showManualSearch, setShowManualSearch] = useState(false);
+
   const [actionTab, setActionTab] = useState('forward');
   const [nextLocation, setNextLocation] = useState('');
   const [nextStatus, setNextStatus] = useState('Pending');
@@ -39,9 +44,6 @@ export default function OfficerDashboard() {
   const [checkingAi, setCheckingAi] = useState(false);
 
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [scannerInitializing, setScannerInitializing] = useState(false);
-  const qrScannerRef = useRef(null);
-  const [scannerError, setScannerError] = useState('');
 
   const [loading, setLoading] = useState(true);
   const [fileLoading, setFileLoading] = useState(false);
@@ -58,7 +60,7 @@ export default function OfficerDashboard() {
   useEffect(() => {
     const fileParam = searchParams.get('file');
     if (fileParam) {
-      handleSelectFile(fileParam);
+      handleSelectFile(fileParam, 'manual');
       searchParams.delete('file');
       setSearchParams(searchParams, { replace: true });
     }
@@ -96,13 +98,14 @@ export default function OfficerDashboard() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const handleSelectFile = async (identifier) => {
+  const handleSelectFile = async (identifier, scanMode = 'manual') => {
     try {
       setFileLoading(true);
       const data = await api.scanFile(identifier);
       setSelectedFile(data.file);
       setSelectedFileHistory(data.recentHistory || []);
       setIsAuditValid(data.auditChainValid);
+      setScannedVia(scanMode);
       setNextLocation(''); setBacktrackLocation(''); setRoutingNotes('');
       setNextStatus('Pending');
       setBacktrackReason(''); setInternalNotes(''); setAiDelayReport(null); setAiBacktrackSuggest(null);
@@ -161,63 +164,52 @@ export default function OfficerDashboard() {
     } catch { /* ignore */ } finally { setCheckingAi(false); }
   };
 
-  const handleForwardFile = async (e) => {
-    e.preventDefault();
-    if (!nextLocation) return;
+  const handleForwardFile = async ({ nextLocation: targetLoc, nextStatus: targetStatus, notes, scannedVia: actionScannedVia, remarks }) => {
     setActionLoading(true);
     try {
-      const res = await api.forwardFile(selectedFile.id, { nextLocation, nextStatus, notes: routingNotes.trim() });
+      const res = await api.forwardFile(selectedFile.id, {
+        nextLocation: targetLoc,
+        nextStatus: targetStatus,
+        notes,
+        scannedVia: actionScannedVia,
+        scanned_via: actionScannedVia,
+        remarks,
+        manualReason: remarks,
+      });
       const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
       const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
-      toast.success(`File routed with "${nextStatus}" status.${emailMsg}${smsMsg}`);
+      toast.success(`File routed with "${targetStatus}" status.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
-      await handleSelectFile(selectedFile.fileUid);
+      await handleSelectFile(selectedFile.fileUid, actionScannedVia);
     } catch (err) {
       toast.error(err.message || 'Forward routing failed.');
     } finally { setActionLoading(false); }
   };
 
-  const handleBacktrackFile = async (e) => {
-    e.preventDefault();
-    if (!backtrackLocation || !backtrackReason.trim()) return;
+  const handleBacktrackFile = async ({ returnLocation: targetLoc, backtrackReason: reason, internalNotes: intNotes, scannedVia: actionScannedVia, remarks }) => {
     setActionLoading(true);
     try {
       const res = await api.backtrackFile(selectedFile.id, {
-        returnLocation: backtrackLocation, backtrackReason: backtrackReason.trim(), internalNotes: internalNotes.trim(),
+        returnLocation: targetLoc,
+        backtrackReason: reason,
+        internalNotes: intNotes,
+        scannedVia: actionScannedVia,
+        scanned_via: actionScannedVia,
+        remarks,
+        manualReason: remarks,
       });
       const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
       const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
-      toast.success(`File returned to ${backtrackLocation}.${emailMsg}${smsMsg}`);
+      toast.success(`File returned to ${targetLoc}.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
-      await handleSelectFile(selectedFile.fileUid);
+      await handleSelectFile(selectedFile.fileUid, actionScannedVia);
     } catch (err) {
       toast.error(err.message || 'Backtrack routing failed.');
     } finally { setActionLoading(false); }
   };
 
-  const startCameraScanner = () => {
-    setIsScannerOpen(true);
-    setScannerError('');
-    setScannerInitializing(true);
-    setTimeout(() => {
-      const html5QrCode = new Html5Qrcode('qr-reader-container');
-      qrScannerRef.current = html5QrCode;
-      html5QrCode.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 220, height: 220 } },
-        (decodedText) => { stopCameraScanner(); handleSelectFile(decodedText); },
-        () => {}
-      ).then(() => setScannerInitializing(false))
-        .catch(() => { setScannerInitializing(false); setScannerError('Could not access camera. Please check hardware permissions.'); });
-    }, 300);
-  };
-
-  const stopCameraScanner = () => {
-    setIsScannerOpen(false);
-    setScannerInitializing(false);
-    if (qrScannerRef.current) {
-      qrScannerRef.current.stop().then(() => { qrScannerRef.current = null; }).catch(() => {});
-    }
+  const handleScanSuccess = (decodedText, scanMode) => {
+    handleSelectFile(decodedText, scanMode);
   };
 
   // Closed files (dispatched, approved, rejected) are archived — no further
@@ -259,25 +251,62 @@ export default function OfficerDashboard() {
 
         <div className="grid items-start gap-6 md:grid-cols-[1.25fr_0.75fr]">
           <div className="space-y-6">
-            {/* Search */}
-            <Card className="relative p-4">
-              <div className="flex gap-3">
-                <Input
-                  className="flex-1" icon={<Icons.Search className="h-4 w-4" />}
-                  placeholder="Search by citizen, title, UID or tracking ID…"
-                  value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={handleSearchKeyDown}
-                  aria-label="Search files"
-                  role="combobox"
-                  aria-expanded={searchResults.length > 0}
-                  aria-controls="officer-search-listbox"
-                  aria-autocomplete="list"
-                  aria-activedescendant={activeResultIndex >= 0 ? `officer-search-option-${activeResultIndex}` : undefined}
-                />
-                <Button variant="outline" onClick={startCameraScanner} className="shrink-0">
-                  <Icons.Scan className="h-4 w-4" /> <span className="hidden sm:inline">Scan</span>
-                </Button>
+            {/* Primary QR Scan & Manual Search Card */}
+            <Card className="relative p-5">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Icons.Scan className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">Desk Verification Scanner</h3>
+                    <p className="text-xs text-muted-foreground">Scan envelope QR tag to route or backtrack</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="primary"
+                    size="md"
+                    onClick={() => setIsScannerOpen(true)}
+                    className="shadow-sm"
+                  >
+                    <Icons.Scan className="h-4 w-4" /> Scan QR Tag (Primary)
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowManualSearch(!showManualSearch)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    {showManualSearch ? 'Hide manual search' : "Can't scan? Search manually"}
+                  </Button>
+                </div>
               </div>
+
+              {/* Secondary Fallback: Manual Search Bar */}
+              {showManualSearch && (
+                <div className="mt-4 pt-4 border-t border-border animate-fade-down">
+                  <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1">
+                    <Icons.AlertCircle className="h-3.5 w-3.5" /> Manual search logged as unverified manual update. Reason required on action.
+                  </p>
+                  <Input
+                    className="w-full"
+                    icon={<Icons.Search className="h-4 w-4" />}
+                    placeholder="Search by citizen, title, UID or tracking ID…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={handleSearchKeyDown}
+                    aria-label="Search files"
+                    role="combobox"
+                    aria-expanded={searchResults.length > 0}
+                    aria-controls="officer-search-listbox"
+                    aria-autocomplete="list"
+                    aria-activedescendant={activeResultIndex >= 0 ? `officer-search-option-${activeResultIndex}` : undefined}
+                  />
+                </div>
+              )}
+
               {(searchResults.length > 0 || (searching && searchQuery)) && (
                 <div className="absolute left-4 right-4 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
                   {searching && searchResults.length === 0 ? (
@@ -290,7 +319,10 @@ export default function OfficerDashboard() {
                           id={`officer-search-option-${idx}`}
                           role="option"
                           aria-selected={idx === activeResultIndex}
-                          onClick={() => handleSelectFile(file.fileUid)}
+                          onClick={() => {
+                            handleSelectFile(file.fileUid, 'manual');
+                            setShowManualSearch(false);
+                          }}
                           onMouseEnter={() => setActiveResultIndex(idx)}
                           className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors cursor-pointer ${
                             idx === activeResultIndex ? 'bg-muted' : 'hover:bg-muted'
@@ -341,117 +373,24 @@ export default function OfficerDashboard() {
                       </span>
                     </div>
                   )}
-
-                  <Tabs
-                    className="mt-5"
-                    tabs={tabs}
-                    active={actionTab}
-                    onChange={(id) => { setActionTab(id); if (id === 'ai' && !aiDelayReport) checkAiInsights(); }}
-                  />
-
-                  <div className="mt-5">
-                    {actionTab === 'forward' && (
-                      <form onSubmit={handleForwardFile} className="space-y-4">
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <Select label="Target desk" id="f_loc" value={nextLocation} onChange={(e) => setNextLocation(e.target.value)} required={!['Approved', 'Dispatched'].includes(nextStatus)}>
-                            <option value="">Choose desk…</option>
-                            {departmentsList.filter((d) => d.isActive).map((d) => (
-                              <option key={d.name} value={d.name}>{d.name}</option>
-                            ))}
-                          </Select>
-                          <Select
-                            label="Update file status" id="f_status" value={nextStatus} onChange={(e) => setNextStatus(e.target.value)} required
-                            hint={nextStatus === 'Dispatched'
-                              ? 'Final status — if no desk is chosen, the file is moved to the archives desk and closed.'
-                              : nextStatus === 'Approved'
-                                ? 'Final status — target desk is optional; the file closes at its current desk.'
-                                : undefined}
-                          >
-                            <option value="Pending">Pending (Under routing)</option>
-                            <option value="Under Review">Under Review (Details verification)</option>
-                            <option value="Verified">Verified (Verification complete)</option>
-                            <option value="Approved">Approved (Final endorsement)</option>
-                            <option value="Dispatched">Dispatched (Closed / Archiving)</option>
-                          </Select>
-                        </div>
-                        <Textarea label="Routing notes" id="f_notes" rows={2}
-                          placeholder="e.g. Verification complete, forwarding for final endorsement."
-                          value={routingNotes} onChange={(e) => setRoutingNotes(e.target.value)} />
-                        <div className="flex justify-end">
-                          <Button type="submit" variant="primary" loading={actionLoading}>Confirm forward <Icons.ArrowRight className="h-4 w-4" /></Button>
-                        </div>
-                      </form>
-                    )}
-
-                    {actionTab === 'backtrack' && (
-                      <form onSubmit={handleBacktrackFile} className="space-y-4">
-                        <div className="grid gap-4 sm:grid-cols-2">
-                          <Select label="Return to desk" id="b_loc" value={backtrackLocation} onChange={(e) => setBacktrackLocation(e.target.value)} required>
-                            <option value="">Choose desk…</option>
-                            {departmentsList.filter((d) => d.isActive).map((d) => (
-                              <option key={d.name} value={d.name}>{d.name}</option>
-                            ))}
-                          </Select>
-                          <Input label="Reason (visible to citizen)" id="b_reason"
-                            placeholder="e.g. Missing ward form stamp." value={backtrackReason}
-                            onChange={(e) => setBacktrackReason(e.target.value)} required />
-                        </div>
-                        <Textarea label="Internal notes (hidden from citizens)" id="b_int" rows={2}
-                          placeholder="e.g. Verify citizen ID against database records."
-                          value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} />
-                        <div className="flex justify-end">
-                          <Button type="submit" variant="danger" loading={actionLoading}>Confirm backtrack</Button>
-                        </div>
-                      </form>
-                    )}
-
-                    {actionTab === 'ai' && (
-                      <div className="space-y-5">
-                        {checkingAi ? (
-                          <div className="space-y-3"><Skeleton className="h-20" /><Skeleton className="h-16" /></div>
-                        ) : (
-                          <>
-                            {aiDelayReport && (
-                              <dl className="grid gap-4 sm:grid-cols-3">
-                                <div className="rounded-xl border border-border bg-muted/40 p-3">
-                                  <dt className="text-xs font-semibold uppercase text-muted-foreground">Delay risk</dt>
-                                  <dd className={`mt-1 text-xl font-bold ${aiDelayReport.delayProbability > 70 ? 'text-red-500' : aiDelayReport.delayProbability > 40 ? 'text-amber-500' : 'text-emerald-500'}`}>{aiDelayReport.delayProbability}%</dd>
-                                </div>
-                                <div className="rounded-xl border border-border bg-muted/40 p-3">
-                                  <dt className="text-xs font-semibold uppercase text-muted-foreground">Expected dwell</dt>
-                                  <dd className="mt-1 text-xl font-bold text-foreground">{aiDelayReport.expectedProcessingHours}h</dd>
-                                </div>
-                                <div className="rounded-xl border border-border bg-muted/40 p-3">
-                                  <dt className="text-xs font-semibold uppercase text-muted-foreground">Confidence</dt>
-                                  <dd className="mt-1 text-xl font-bold capitalize text-foreground">{aiDelayReport.confidenceScore}</dd>
-                                </div>
-                              </dl>
-                            )}
-                            {aiBacktrackSuggest && (
-                              <div className="rounded-xl border border-primary/15 bg-primary/[0.02] p-4">
-                                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-foreground">Backtrack suggestion</h4>
-                                <p className="text-xs leading-relaxed text-muted-foreground">{aiBacktrackSuggest.recommendation}</p>
-                                {aiBacktrackSuggest.missingDocuments?.length > 0 && (
-                                  <div className="mt-3 flex flex-wrap gap-2">
-                                    {aiBacktrackSuggest.missingDocuments.map((doc) => (
-                                      <span key={doc} className="rounded bg-red-500/10 px-2 py-0.5 text-xs font-semibold text-red-500">{doc}</span>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            {!aiDelayReport && !aiBacktrackSuggest && (
-                              <EmptyState className="border-0" icon={<Icons.Sparkles className="h-6 w-6" />} title="AI service unavailable" description="Congestion analysis could not be reached. Try again shortly." />
-                            )}
-                            <div className="flex justify-end">
-                              <Button variant="outline" onClick={checkAiInsights}><Icons.Zap className="h-4 w-4" /> Refresh analysis</Button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
                 </Card>
+
+                {/* File Action Workflow Component */}
+                <FileActions
+                  selectedFile={selectedFile}
+                  departmentsList={departmentsList}
+                  actionTab={actionTab}
+                  setActionTab={(id) => {
+                    setActionTab(id);
+                    if (id === 'ai' && !aiDelayReport) checkAiInsights();
+                  }}
+                  tabs={tabs}
+                  actionLoading={actionLoading}
+                  scannedVia={scannedVia}
+                  onScanClick={() => setIsScannerOpen(true)}
+                  onForwardSubmit={handleForwardFile}
+                  onBacktrackSubmit={handleBacktrackFile}
+                />
 
                 <Card>
                   <h4 className="mb-5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Ledger movement history</h4>
@@ -461,8 +400,16 @@ export default function OfficerDashboard() {
                         <TimelineItem key={idx} title={item.actionType}
                           meta={new Date(item.timestamp).toLocaleString()}
                           tone={item.actionType === 'Backtracked' ? 'red' : 'primary'}>
-                          <p className="text-xs font-medium text-foreground/70">{item.currentLocation} · {item.officerId?.name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs font-medium text-foreground/70">{item.currentLocation} · {item.officerId?.name}</p>
+                            {item.scannedVia && item.scannedVia !== 'manual' && (
+                              <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                Verified scan ({item.scannedVia})
+                              </span>
+                            )}
+                          </div>
                           {item.notes && <p className="mt-1">{item.notes}</p>}
+                          {item.remarks && <p className="mt-0.5 text-xs text-muted-foreground italic">Reason: {item.remarks}</p>}
                         </TimelineItem>
                       ))}
                     </Timeline>
@@ -475,8 +422,12 @@ export default function OfficerDashboard() {
               <EmptyState
                 icon={<Icons.Scan className="h-6 w-6" />}
                 title="No file selected"
-                description="Search for a file or scan a QR tag on a physical envelope to begin processing."
-                action={<Button variant="outline" onClick={startCameraScanner}><Icons.Scan className="h-4 w-4" /> Scan QR tag</Button>}
+                description="Scan a QR tag on a physical envelope to begin processing, or search manually if unreadable."
+                action={
+                  <Button variant="primary" onClick={() => setIsScannerOpen(true)}>
+                    <Icons.Scan className="h-4 w-4" /> Scan QR tag (Primary)
+                  </Button>
+                }
               />
             )}
           </div>
@@ -506,21 +457,12 @@ export default function OfficerDashboard() {
         </div>
       </Container>
 
-      <Modal isOpen={isScannerOpen} onClose={stopCameraScanner} title="Scan QR tag" description="Center the printed QR tag in the viewfinder.">
-        <div className="space-y-4">
-          <div className="relative mx-auto aspect-square max-w-[280px] overflow-hidden rounded-xl border border-border bg-black">
-            <div id="qr-reader-container" className="h-full w-full" />
-            {scannerInitializing && !scannerError && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-black/80">
-                <Spinner className="h-6 w-6 text-white" />
-                <p className="text-xs font-medium text-white/80">Starting camera…</p>
-              </div>
-            )}
-          </div>
-          {scannerError && <p className="text-center text-xs font-semibold text-red-500">{scannerError}</p>}
-          <div className="flex justify-end"><Button variant="secondary" onClick={stopCameraScanner}>Cancel</Button></div>
-        </div>
-      </Modal>
+      {/* QR Scanner Modal Component */}
+      <QrScanner
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScanSuccess={handleScanSuccess}
+      />
     </AppShell>
   );
 }

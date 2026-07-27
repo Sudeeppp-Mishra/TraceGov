@@ -423,12 +423,27 @@ async function runTransactionalWrite(operationsFn) {
  */
 export async function forwardFile(req, res, next) {
   try {
-    const { nextLocation, nextStatus = FILE_STATUSES.PENDING, notes } = req.body;
+    const {
+      nextLocation,
+      nextStatus = FILE_STATUSES.PENDING,
+      notes,
+      scannedVia: rawScannedVia,
+      scanned_via,
+      remarks: rawRemarks,
+      manualReason,
+    } = req.body;
+
+    const scannedVia = (rawScannedVia || scanned_via || 'manual').toLowerCase();
+    const remarks = (rawRemarks || manualReason || notes || '').trim();
 
     const isFinalStatus = [FILE_STATUSES.APPROVED, FILE_STATUSES.DISPATCHED, FILE_STATUSES.REJECTED].includes(nextStatus);
 
     if (!nextLocation && !isFinalStatus) {
       return res.status(400).json({ error: 'nextLocation is required' });
+    }
+
+    if (scannedVia === 'manual' && !remarks) {
+      return res.status(400).json({ error: 'A mandatory reason (e.g. "QR damaged", "Bulk processing") is required for manual entry updates.' });
     }
 
     const result = await runTransactionalWrite(async (session) => {
@@ -473,6 +488,8 @@ export async function forwardFile(req, res, next) {
         previousLocation,
         nextLocation: targetLocation,
         notes,
+        scannedVia,
+        remarks: remarks || undefined,
         session,
       });
 
@@ -507,6 +524,8 @@ export async function forwardFile(req, res, next) {
         actionType: result.logEntry.actionType,
         timestamp: result.logEntry.timestamp,
         entryHash: result.logEntry.entryHash,
+        scannedVia: result.logEntry.scannedVia,
+        remarks: result.logEntry.remarks,
       },
       smsNotified: smsResult?.success ?? false,
       emailNotified: emailResult?.success ?? false,
@@ -527,10 +546,25 @@ export async function forwardFile(req, res, next) {
  */
 export async function backtrackFile(req, res, next) {
   try {
-    const { returnLocation, backtrackReason, internalNotes } = req.body;
+    const {
+      returnLocation,
+      backtrackReason,
+      internalNotes,
+      scannedVia: rawScannedVia,
+      scanned_via,
+      remarks: rawRemarks,
+      manualReason,
+    } = req.body;
+
+    const scannedVia = (rawScannedVia || scanned_via || 'manual').toLowerCase();
+    const remarks = (rawRemarks || manualReason || backtrackReason || '').trim();
 
     if (!returnLocation || !backtrackReason) {
       return res.status(400).json({ error: 'returnLocation and backtrackReason are required' });
+    }
+
+    if (scannedVia === 'manual' && !remarks) {
+      return res.status(400).json({ error: 'A mandatory reason is required for manual entry backtrack updates.' });
     }
 
     const result = await runTransactionalWrite(async (session) => {
@@ -557,6 +591,8 @@ export async function backtrackFile(req, res, next) {
         backtrackReason,
         internalNotes,
         notes: `Backtracked: ${backtrackReason}`,
+        scannedVia,
+        remarks,
         session,
       });
 

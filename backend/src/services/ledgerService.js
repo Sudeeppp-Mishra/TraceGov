@@ -14,6 +14,8 @@ export async function appendMovementLog({
   internalNotes,
   backtrackReason,
   nextLocation,
+  scannedVia,
+  remarks,
   timestamp,
   session,
 }) {
@@ -41,6 +43,8 @@ export async function appendMovementLog({
     internalNotes,
     backtrackReason,
     nextLocation,
+    scannedVia: scannedVia || 'manual',
+    remarks: remarks || undefined,
   };
 
   // Compute the cryptographic hash for the new record

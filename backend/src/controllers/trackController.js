@@ -28,7 +28,7 @@ export async function trackFile(req, res, next) {
     const [movements, smsCount] = await Promise.all([
       MovementHistory.find({ fileId: file._id })
         .sort({ timestamp: 1 })
-        .select('actionType currentLocation timestamp notes backtrackReason -_id')
+        .select('actionType currentLocation timestamp notes backtrackReason scannedVia remarks -_id')
         .lean(),
       SmsLog.countDocuments({ fileId: file._id, deliveryStatus: { $ne: 'failed' } }),
     ]);
@@ -52,6 +52,8 @@ export async function trackFile(req, res, next) {
         timestamp: log.timestamp,
         message: displayMessage,
         requiresCitizenAction: log.actionType === FILE_STATUSES.BACKTRACKED,
+        scanned_via: log.scannedVia || 'manual',
+        remarks: log.remarks || null,
       };
     });
 

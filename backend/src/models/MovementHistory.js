@@ -64,6 +64,15 @@ const movementHistorySchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    scannedVia: {
+      type: String,
+      enum: ['webcam', 'mobile', 'manual'],
+      default: 'manual',
+    },
+    remarks: {
+      type: String,
+      trim: true,
+    },
     previousHash: {
       type: String,
       required: [true, 'Previous hash link is required'],

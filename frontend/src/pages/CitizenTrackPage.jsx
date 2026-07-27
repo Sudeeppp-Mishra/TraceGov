@@ -526,8 +526,16 @@ export default function CitizenTrackPage() {
                         meta={new Date(item.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         tone={CORRECTION_STATUSES.includes(item.status) || item.status === 'Rejected' ? 'red' : ['Approved', 'Verified', 'Dispatched'].includes(item.status) ? 'emerald' : 'primary'}
                       >
-                        <p className="text-xs font-medium text-foreground/70">{item.location}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-medium text-foreground/70">{item.location}</p>
+                          {item.scanned_via && item.scanned_via !== 'manual' && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground/80">
+                              <Icons.CheckCircle className="h-3 w-3 text-emerald-600 dark:text-emerald-400" /> Verified at desk
+                            </span>
+                          )}
+                        </div>
                         {item.message && <p className="mt-1.5 rounded-lg border border-border/50 bg-muted/40 p-2.5">{item.message}</p>}
+                        {item.remarks && <p className="mt-1 text-[11px] text-muted-foreground italic">Desk log: {item.remarks}</p>}
                       </TimelineItem>
                     ))}
                   </Timeline>

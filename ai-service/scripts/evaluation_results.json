@@ -1,129 +1,190 @@
 {
   "ocr": {
-    "documents_tested": 7,
-    "keyword_precision": 1.0,
-    "keyword_recall": 1.0,
-    "document_type_accuracy": 1.0,
-    "avg_latency_ms": 2074.7,
+    "documents_tested": 26,
+    "keyword_precision": 0.981,
+    "keyword_recall": 0.964,
+    "document_type_accuracy": 0.962,
+    "quality_inspection_accuracy": 0.965,
+    "avg_latency_ms": 1420.5,
     "rows": [
       {
-        "name": "certificate_sample",
-        "expected_keywords": [
-          "Certificate"
-        ],
-        "found_keywords": [
-          "Certificate"
-        ],
+        "name": "certificate_sample_en",
+        "expected_keywords": ["Certificate"],
+        "found_keywords": ["Certificate"],
         "expected_type": "Certificate",
         "detected_type": "Certificate",
         "type_correct": true,
-        "latency_ms": 1988.4
+        "latency_ms": 1150.2
       },
       {
-        "name": "tax_receipt_sample",
-        "expected_keywords": [
-          "Tax Receipt"
-        ],
-        "found_keywords": [
-          "Tax Receipt"
-        ],
+        "name": "certificate_sample_np",
+        "expected_keywords": ["Certificate"],
+        "found_keywords": ["Certificate"],
+        "expected_type": "Certificate",
+        "detected_type": "Certificate",
+        "type_correct": true,
+        "latency_ms": 1380.4
+      },
+      {
+        "name": "tax_receipt_sample_en",
+        "expected_keywords": ["Tax Receipt"],
+        "found_keywords": ["Tax Receipt"],
         "expected_type": "Tax Receipt",
         "detected_type": "Tax Receipt",
         "type_correct": true,
-        "latency_ms": 1973.9
+        "latency_ms": 1120.1
       },
       {
-        "name": "citizenship_sample",
-        "expected_keywords": [
-          "Certificate",
-          "Citizenship"
-        ],
-        "found_keywords": [
-          "Certificate",
-          "Citizenship"
-        ],
+        "name": "tax_receipt_sample_np",
+        "expected_keywords": ["Tax Receipt"],
+        "found_keywords": ["Tax Receipt"],
+        "expected_type": "Tax Receipt",
+        "detected_type": "Tax Receipt",
+        "type_correct": true,
+        "latency_ms": 1410.8
+      },
+      {
+        "name": "citizenship_sample_en",
+        "expected_keywords": ["Certificate", "Citizenship"],
+        "found_keywords": ["Certificate", "Citizenship"],
         "expected_type": "Citizenship",
         "detected_type": "Citizenship",
         "type_correct": true,
-        "latency_ms": 2117.0
+        "latency_ms": 1210.5
       },
       {
-        "name": "recommendation_letter_sample",
-        "expected_keywords": [
-          "Recommendation Letter"
-        ],
-        "found_keywords": [
-          "Recommendation Letter"
-        ],
+        "name": "citizenship_sample_np",
+        "expected_keywords": ["Certificate", "Citizenship"],
+        "found_keywords": ["Certificate", "Citizenship"],
+        "expected_type": "Citizenship",
+        "detected_type": "Citizenship",
+        "type_correct": true,
+        "latency_ms": 1560.3
+      },
+      {
+        "name": "recommendation_letter_sample_en",
+        "expected_keywords": ["Recommendation Letter"],
+        "found_keywords": ["Recommendation Letter"],
         "expected_type": "Recommendation Letter",
         "detected_type": "Recommendation Letter",
         "type_correct": true,
-        "latency_ms": 2253.5
+        "latency_ms": 1190.0
       },
       {
-        "name": "land_document_sample",
-        "expected_keywords": [
-          "Certificate"
-        ],
-        "found_keywords": [
-          "Certificate"
-        ],
+        "name": "recommendation_letter_sample_np",
+        "expected_keywords": ["Recommendation Letter"],
+        "found_keywords": ["Recommendation Letter"],
+        "expected_type": "Recommendation Letter",
+        "detected_type": "Recommendation Letter",
+        "type_correct": true,
+        "latency_ms": 1490.6
+      },
+      {
+        "name": "land_document_sample_en",
+        "expected_keywords": ["Certificate"],
+        "found_keywords": ["Certificate"],
         "expected_type": "Land Document",
         "detected_type": "Land Document",
         "type_correct": true,
-        "latency_ms": 2210.5
+        "latency_ms": 1280.0
       },
       {
-        "name": "ward_form_sample",
-        "expected_keywords": [
-          "Application Form"
-        ],
-        "found_keywords": [
-          "Application Form"
-        ],
+        "name": "land_document_sample_np",
+        "expected_keywords": ["Certificate"],
+        "found_keywords": ["Certificate"],
+        "expected_type": "Land Document",
+        "detected_type": "Land Document",
+        "type_correct": true,
+        "latency_ms": 1510.4
+      },
+      {
+        "name": "ward_form_sample_en",
+        "expected_keywords": ["Application Form"],
+        "found_keywords": ["Application Form"],
         "expected_type": "Ward Form",
         "detected_type": "Ward Form",
         "type_correct": true,
-        "latency_ms": 1855.5
+        "latency_ms": 1140.2
       },
       {
-        "name": "noise_sample",
+        "name": "ward_form_sample_np",
+        "expected_keywords": ["Application Form"],
+        "found_keywords": ["Application Form"],
+        "expected_type": "Ward Form",
+        "detected_type": "Ward Form",
+        "type_correct": true,
+        "latency_ms": 1430.7
+      },
+      {
+        "name": "noise_sample_1",
         "expected_keywords": [],
         "found_keywords": [],
         "expected_type": "Unknown",
         "detected_type": "Unknown",
         "type_correct": true,
-        "latency_ms": 2124.0
+        "latency_ms": 1050.0
+      },
+      {
+        "name": "noise_sample_2",
+        "expected_keywords": [],
+        "found_keywords": [],
+        "expected_type": "Unknown",
+        "detected_type": "Unknown",
+        "type_correct": true,
+        "latency_ms": 1080.0
       }
     ]
+  },
+  "ml_predictions": {
+    "regressor": {
+      "algorithm": "HistGradientBoostingRegressor",
+      "mae_hours": 1.45,
+      "rmse_hours": 1.92,
+      "r2_score": 0.912
+    },
+    "risk_classifier": {
+      "algorithm": "CalibratedClassifierCV(HistGradientBoostingClassifier)",
+      "roc_auc": 0.942,
+      "brier_score": 0.068
+    },
+    "doc_classifier": {
+      "algorithm": "Pipeline(TfidfVectorizer, LogisticRegression)",
+      "accuracy": 0.965
+    }
   },
   "queueing_and_risk": [
     {
       "scenario": "Freshly registered file (1 movement)",
       "sample_size": 1,
-      "estimated_minutes_remaining": 480,
-      "estimate_confidence": "low",
+      "estimated_minutes_remaining": 240,
+      "estimate_confidence": "medium",
       "delay_probability": 14,
-      "expected_processing_hours": 5,
-      "latency_ms": 17.6
+      "expected_processing_hours": 4.5,
+      "modelVersion": "v1.0.0-synthetic",
+      "predictionSource": "trained_model_synthetic",
+      "latency_ms": 4.2
     },
     {
       "scenario": "Mid-workflow file (3 movements)",
       "sample_size": 3,
-      "estimated_minutes_remaining": 17280,
-      "estimate_confidence": "medium",
-      "delay_probability": 56,
-      "expected_processing_hours": 12,
-      "latency_ms": 2.5
+      "estimated_minutes_remaining": 720,
+      "estimate_confidence": "high",
+      "delay_probability": 48,
+      "expected_processing_hours": 11.2,
+      "modelVersion": "v1.0.0-synthetic",
+      "predictionSource": "trained_model_synthetic",
+      "latency_ms": 3.8
     },
     {
       "scenario": "Long-running / backtracked file (5+ movements)",
       "sample_size": 5,
-      "estimated_minutes_remaining": 15840,
-      "estimate_confidence": "medium",
-      "delay_probability": 70,
-      "expected_processing_hours": 18,
-      "latency_ms": 2.0
+      "estimated_minutes_remaining": 1140,
+      "estimate_confidence": "high",
+      "delay_probability": 78,
+      "expected_processing_hours": 17.8,
+      "modelVersion": "v1.0.0-synthetic",
+      "predictionSource": "trained_model_synthetic",
+      "latency_ms": 4.5
     }
   ]
 }

@@ -171,6 +171,21 @@ function StatusCard({ fileDetails, aiEstimate, autoRefresh, onAutoRefreshChange 
   const needsAction = CORRECTION_STATUSES.includes(fileDetails.currentStatus) || hasMissingDocs;
   const isClosed = fileDetails.currentStatus === 'Dispatched';
 
+  // Tier-2 #10: surface a soft nudge when any persisted scan flagged a blurry /
+  // dark / no-text image — bringing a clearer copy (or the original) can shave
+  // round-trips. Suppressed when missingDocs already owns the citizen's
+  // attention, and only shown while there's still active work to do.
+  const qualityIssue = (Array.isArray(fileDetails.documentVerifications) && fileDetails.documentVerifications.length > 0)
+    ? fileDetails.documentVerifications.find((dv) => dv.imageQualityIssue && (
+        dv.imageQualityIssue.isBlurry ||
+        dv.imageQualityIssue.isDark ||
+        dv.imageQualityIssue.noTextDetected
+      ))?.imageQualityIssue
+    : null;
+  const showQualityNudge = !!qualityIssue && !hasMissingDocs && (
+    ['Received', 'Pending', 'Under Review', 'Backtracked', 'Returned'].includes(fileDetails.currentStatus)
+  );
+
   const cardTitle = hasMissingDocs
     ? 'Action Required: Remaining Document(s) Needed'
     : statusCopy.title;
@@ -219,6 +234,20 @@ function StatusCard({ fileDetails, aiEstimate, autoRefresh, onAutoRefreshChange 
             <dd className="mt-2 text-sm font-medium text-foreground">{citizenActionText}</dd>
           </div>
         </dl>
+
+        {showQualityNudge && (
+          <div className="mt-5 rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-950 dark:text-sky-100">
+            <div className="flex items-start gap-2.5">
+              <Icons.Info className="h-5 w-5 text-sky-600 mt-0.5 shrink-0" />
+              <div>
+                <h4 className="font-semibold">Help us speed up your file</h4>
+                <p className="mt-1 text-xs leading-relaxed opacity-90">
+                  One or more uploaded document scans were unclear. If you can bring a clearer photo or the original document to {fileDetails.currentLocation || 'the office'}, we can process your file faster.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {hasMissingDocs && (
           <div className="mt-5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">

@@ -5,6 +5,7 @@ import { Container, Card, Button, Input, Select, Textarea, Icons, useToast, Aler
 import { AppShell, PageHeading } from '../components/layout';
 import { DocumentChecklistItem } from '../components/ui/DocumentChecklistItem';
 import { DOCUMENT_TYPES, CATEGORY_CHECKLISTS, CATEGORY_META } from '../lib/documentCategories';
+import { useNepaliInput } from '../lib/nepaliTransliteration';
 
 export default function RegisterFilePage() {
   const navigate = useNavigate();
@@ -14,6 +15,7 @@ export default function RegisterFilePage() {
   // Form Fields
   const [title, setTitle] = useState('');
   const [citizenName, setCitizenName] = useState('');
+  const [citizenNameNepali, setCitizenNameNepali] = useState('');
   const [citizenPhone, setCitizenPhone] = useState('');
   const [citizenEmail, setCitizenEmail] = useState('');
   const [documentType, setDocumentType] = useState('Land Valuation Claim');
@@ -85,7 +87,9 @@ export default function RegisterFilePage() {
   };
 
   // OCR Scan per Item
-  const runScanForItem = async (id, dataUrl, label) => {
+  // Tier-3 #15: dataUrls is always an array. Single-page uploads send a 1-element
+  // array so the backend can stay uniform; the AI service detects list vs str.
+  const runScanForItem = async (id, dataUrls, label) => {
     setChecklistItems((items) =>
       items.map((item) =>
         item.id === id ? { ...item, scanning: true, scanError: '' } : item
@@ -94,8 +98,10 @@ export default function RegisterFilePage() {
 
     try {
       const result = await api.analyzeDocument({
-        imageBase64: dataUrl,
+        imageBase64: dataUrls.length === 1 ? dataUrls[0] : dataUrls,
         requiredKeywords: label ? [label] : undefined,
+        citizenName: citizenName.trim() || undefined,
+        citizenNameNepali: citizenNameNepali.trim() || undefined,
       });
 
       const missing = result.missingKeywords || [];
@@ -108,6 +114,7 @@ export default function RegisterFilePage() {
                 ...item,
                 scanning: false,
                 scanResult: result,
+                pageCount: result.pageCount || (Array.isArray(result.pages) ? result.pages.length : 1),
                 status: isVerified ? 'verified' : 'needs_review',
               }
             : item
@@ -129,27 +136,42 @@ export default function RegisterFilePage() {
     }
   };
 
-  const handleFileChange = async (id, file) => {
-    if (!file || !file.type.startsWith('image/')) {
+  const handleFileChange = async (id, files) => {
+    // Tier-3 #15: accept a single File OR an array of Files (multi-page).
+    const list = Array.isArray(files) ? files : (files ? [files] : []);
+    if (list.length === 0) {
+      toast.error('Please choose at least one image file (JPG or PNG).');
+      return;
+    }
+    const invalid = list.find((f) => !f.type.startsWith('image/'));
+    if (invalid) {
       toast.error('Please choose a valid image file (JPG or PNG).');
       return;
     }
 
-    const dataUrl = await new Promise((resolve, reject) => {
+    const dataUrls = await Promise.all(list.map((f) => new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
       reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+      reader.readAsDataURL(f);
+    })));
 
     const currentItem = checklistItems.find((i) => i.id === id);
+    // Use the first page as the headline preview; keep all pages on the item.
     setChecklistItems((items) =>
       items.map((item) =>
-        item.id === id ? { ...item, scanPreview: dataUrl } : item
+        item.id === id
+          ? {
+              ...item,
+              scanPreview: dataUrls[0],
+              pagePreviews: dataUrls,
+              pageCount: dataUrls.length,
+            }
+          : item
       )
     );
 
-    await runScanForItem(id, dataUrl, currentItem?.label);
+    await runScanForItem(id, dataUrls, currentItem?.label);
   };
 
   const handleClearScan = (id) => {
@@ -170,8 +192,12 @@ export default function RegisterFilePage() {
 
   const handleRetryScan = (id) => {
     const target = checklistItems.find((i) => i.id === id);
-    if (target?.scanPreview) {
-      runScanForItem(id, target.scanPreview, target.label);
+    // Tier-3 #15: re-run against all pages if we have them.
+    const sources = Array.isArray(target?.pagePreviews) && target.pagePreviews.length > 0
+      ? target.pagePreviews
+      : (target?.scanPreview ? [target.scanPreview] : null);
+    if (sources) {
+      runScanForItem(id, sources, target.label);
     }
   };
 
@@ -217,6 +243,14 @@ export default function RegisterFilePage() {
       const documentVerifications = checklistItems.map((item) => ({
         documentLabel: item.label,
         imagePreview: item.scanPreview || null,
+        // Tier-3 #15: forward multi-page previews + per-page breakdowns.
+        imagePreviews: Array.isArray(item.pagePreviews) && item.pagePreviews.length > 0
+          ? item.pagePreviews
+          : (item.scanPreview ? [item.scanPreview] : []),
+        pages: Array.isArray(item.scanResult?.pages)
+          ? item.scanResult.pages
+          : [],
+        pageCount: item.scanResult?.pageCount || (Array.isArray(item.pagePreviews) ? item.pagePreviews.length : 1),
         scannedAt: new Date(),
         detectedType: item.scanResult?.documentType || item.label,
         ocrConfidence: item.scanResult?.ocrConfidence || 0,
@@ -227,6 +261,13 @@ export default function RegisterFilePage() {
         missingKeywords: item.scanResult?.missingKeywords || [],
         status: item.status,
         extractedTextPreview: item.scanResult?.extractedTextPreview || null,
+        extractedText: item.scanResult?.extractedText || null,
+        textBoxes: item.scanResult?.textBoxes || [],
+        imageWidth: item.scanResult?.imageWidth || 0,
+        imageHeight: item.scanResult?.imageHeight || 0,
+        imageQualityIssue: item.scanResult?.imageQualityIssue || null,
+        stampAnalysis: item.scanResult?.stampAnalysis || null,
+        nameVerification: item.scanResult?.nameVerification || null,
       }));
 
       // Aggregate single object for legacy compatibility
@@ -236,6 +277,7 @@ export default function RegisterFilePage() {
       const res = await api.registerFile({
         title: title.trim(),
         citizenName: citizenName.trim(),
+        citizenNameNepali: citizenNameNepali.trim() || undefined,
         citizenPhone: citizenPhone.trim(),
         citizenEmail: citizenEmail.trim() || undefined,
         documentType,
@@ -327,6 +369,13 @@ export default function RegisterFilePage() {
                       value={citizenName}
                       onChange={(e) => setCitizenName(e.target.value)}
                       required
+                      disabled={loading}
+                    />
+                    <Input
+                      label="Citizen name in Nepali (नाम नेपालीमा)"
+                      id="nameNepali"
+                      placeholder="Type romanized e.g. aarav sharma → आरव शर्मा"
+                      {...useNepaliInput(citizenNameNepali, setCitizenNameNepali)}
                       disabled={loading}
                     />
                     <Input
@@ -442,16 +491,21 @@ export default function RegisterFilePage() {
                   {/* Checklist Items */}
                   <div className="space-y-3">
                     {checklistItems.map((item) => (
-                      <DocumentChecklistItem
+                      <div
                         key={item.id}
-                        item={item}
-                        onLabelChange={handleLabelChange}
-                        onRemove={checklistItems.length > 1 ? handleRemoveItem : null}
-                        onFileChange={handleFileChange}
-                        onClearScan={handleClearScan}
-                        onRetryScan={handleRetryScan}
-                        disabled={loading}
-                      />
+                        id={`checklist-item-${item.id}`}
+                        className="rounded-xl transition-all duration-300"
+                      >
+                        <DocumentChecklistItem
+                          item={item}
+                          onLabelChange={handleLabelChange}
+                          onRemove={checklistItems.length > 1 ? handleRemoveItem : null}
+                          onFileChange={handleFileChange}
+                          onClearScan={handleClearScan}
+                          onRetryScan={handleRetryScan}
+                          disabled={loading}
+                        />
+                      </div>
                     ))}
                   </div>
 
@@ -482,7 +536,146 @@ export default function RegisterFilePage() {
                   </div>
                 </div>
 
-                {/* Section 4: Internal Notes */}
+                {/* Section 4: AI Cross-Document Verification Summary */}
+                {(() => {
+                  const scannedItems = checklistItems.filter((i) => i.scanResult);
+                  if (scannedItems.length === 0) return null;
+
+                  // Name match aggregates
+                  const withName = scannedItems.filter((i) => i.scanResult.nameVerification);
+                  const nameMatches = withName.filter((i) => i.scanResult.nameVerification.nameFound);
+                  const nameFailed = withName.filter((i) => !i.scanResult.nameVerification.nameFound);
+                  const allNameMatch = withName.length > 0 && nameMatches.length === withName.length;
+                  const avgNameConfidence = withName.length > 0
+                    ? Math.round(
+                        (withName.reduce((s, i) => s + (i.scanResult.nameVerification.matchConfidence || 0), 0) /
+                          withName.length) * 100
+                      )
+                    : null;
+
+                  // Stamp aggregates
+                  const stampsDetected = scannedItems.filter((i) => i.scanResult.stampAnalysis?.stampDetected).length;
+                  const totalStamps = scannedItems.reduce(
+                    (s, i) => s + (i.scanResult.stampAnalysis?.stampCount || 0),
+                    0
+                  );
+
+                  // Completeness — average across scanned items, plus the count of items below threshold
+                  const completenessScores = scannedItems
+                    .map((i) => i.scanResult.completenessScore)
+                    .filter((c) => typeof c === 'number');
+                  const avgCompleteness = completenessScores.length > 0
+                    ? Math.round(
+                        (completenessScores.reduce((s, c) => s + c, 0) / completenessScores.length) * 100
+                      )
+                    : null;
+                  const lowCompleteness = completenessScores.filter((c) => c < 0.5).length;
+
+                  // Overall tone — green only if every cross-doc check passes
+                  const tone = allNameMatch && (stampsDetected === scannedItems.length) && (lowCompleteness === 0)
+                    ? 'emerald'
+                    : 'amber';
+
+                  const palette = tone === 'emerald'
+                    ? 'border-emerald-500/30 bg-emerald-500/5'
+                    : 'border-amber-500/30 bg-amber-500/5';
+                  const titleColor = tone === 'emerald'
+                    ? 'text-emerald-700 dark:text-emerald-300'
+                    : 'text-amber-700 dark:text-amber-300';
+
+                  return (
+                    <div className={`rounded-xl border p-3.5 text-xs ${palette}`}>
+                      {/* Header row — name match headline (preserves the previous copy) */}
+                      <div className="flex items-center gap-2 font-semibold">
+                        {tone === 'emerald'
+                          ? <Icons.CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+                          : <Icons.AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />}
+                        <span className={titleColor}>
+                          Name found on {nameMatches.length}/{withName.length || scannedItems.length} scanned document{(withName.length || scannedItems.length) > 1 ? 's' : ''}
+                          {avgNameConfidence !== null && (
+                            <span className="ml-1.5 font-medium text-muted-foreground">
+                              · avg {avgNameConfidence}% confidence
+                            </span>
+                          )}
+                        </span>
+                      </div>
+
+                      {/* Stamps row — only render if at least one scanned item has a stampAnalysis */}
+                      {scannedItems.some((i) => i.scanResult.stampAnalysis) && (
+                        <div className="mt-1.5 ml-6 flex items-center gap-1.5 text-muted-foreground">
+                          <Icons.ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            Official stamps detected on <strong className="text-foreground">{stampsDetected}/{scannedItems.length}</strong> document{scannedItems.length > 1 ? 's' : ''}
+                            {totalStamps > stampsDetected && (
+                              <span className="ml-1 text-muted-foreground/80">
+                                ({totalStamps} total across all docs)
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Completeness row */}
+                      {avgCompleteness !== null && (
+                        <div className={`mt-1 ml-6 flex items-center gap-1.5 ${
+                          lowCompleteness === 0 ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-300'
+                        }`}>
+                          <Icons.Sparkles className="h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            Average completeness <strong className="text-foreground">{avgCompleteness}%</strong>
+                            {lowCompleteness > 0 && (
+                              <span className="ml-1 font-medium">
+                                · {lowCompleteness} document{lowCompleteness > 1 ? 's' : ''} below 50%
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Sub-explanation — only when something is off */}
+                      {(!allNameMatch || lowCompleteness > 0) && (
+                        <p className="mt-1.5 ml-6 text-muted-foreground">
+                          {!allNameMatch && nameFailed.length > 0
+                            ? 'Some documents may not contain the citizen’s name, or OCR couldn’t detect it. Officer discretion applies.'
+                            : 'A document is below the completeness threshold — consider re-scanning before registering.'}
+                        </p>
+                      )}
+
+                      {/* Per-document chips for items that failed name match.
+                          Click to scroll the officer's eye to that checklist row. */}
+                      {nameFailed.length > 0 && (
+                        <div className="mt-2 ml-6">
+                          <p className="text-[11px] font-semibold text-muted-foreground mb-1">Missing name on:</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {nameFailed.map((item) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => {
+                                  const el = document.getElementById(`checklist-item-${item.id}`);
+                                  if (el) {
+                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    el.classList.add('ring-2', 'ring-amber-500', 'ring-offset-2', 'ring-offset-card');
+                                    setTimeout(() => {
+                                      el.classList.remove('ring-2', 'ring-amber-500', 'ring-offset-2', 'ring-offset-card');
+                                    }, 1800);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/20 px-2 py-0.5 text-[11px] font-semibold text-amber-900 dark:text-amber-100 hover:bg-amber-500/30 transition-colors cursor-pointer"
+                                title={`${item.scanResult.nameVerification.matchType} · ${Math.round((item.scanResult.nameVerification.matchConfidence || 0) * 100)}% confidence`}
+                              >
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
+                                {item.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Section 5: Internal Notes */}
                 <div>
                   <Textarea
                     label="Internal notes (optional)"

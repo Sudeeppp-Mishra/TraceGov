@@ -418,34 +418,40 @@ export function Modal({ isOpen, onClose, title, description, children, className
 
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-navy-950/50 backdrop-blur-sm animate-fade-in" onClick={onClose} aria-hidden="true" />
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={title ? idsRef.current.title : undefined}
-        aria-describedby={description ? idsRef.current.desc : undefined}
-        tabIndex={-1}
-        className={`relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-zoom-in outline-none ${className}`}
-      >
-        <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
-          <div>
-            <h3 id={idsRef.current.title} className="text-base font-semibold text-foreground">{title}</h3>
-            {description && <p id={idsRef.current.desc} className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+    <div
+      className="fixed inset-0 z-[100] overflow-y-auto"
+      onClick={onClose}
+      aria-hidden="true"
+    >
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={title ? idsRef.current.title : undefined}
+          aria-describedby={description ? idsRef.current.desc : undefined}
+          tabIndex={-1}
+          onClick={(e) => e.stopPropagation()}
+          className={`relative w-full max-w-lg rounded-2xl border border-border bg-card shadow-2xl animate-zoom-in outline-none my-4 ${className}`}
+        >
+          <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
+            <div>
+              <h3 id={idsRef.current.title} className="text-base font-semibold text-foreground">{title}</h3>
+              {description && <p id={idsRef.current.desc} className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="-mr-1.5 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
+              aria-label="Close dialog"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="-mr-1.5 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
-            aria-label="Close dialog"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="px-6 py-5">{children}</div>
         </div>
-        <div className="px-6 py-5">{children}</div>
       </div>
     </div>
   );
@@ -794,7 +800,12 @@ export const Icons = {
   Grid: mk(<path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z" />),
   TrendingUp: mk(<path d="M3 17l6-6 4 4 8-8m0 0h-5m5 0v5" />),
   RefreshCw: mk(<path d="M20 11A8.1 8.1 0 004.5 9M4 5v4h4m-4 6a8.1 8.1 0 0015.5 2m.5 4v-4h-4" />),
+  Upload: mk(<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />),
+  Undo: mk(<path d="M3 7v6h6M3 13a9 9 0 0118 0 9 9 0 01-9 9 9 9 0 01-7.7-4.4" />),
 };
 
 export { QrScanner } from './QrScanner';
 export { FileActions } from './FileActions';
+export { ExtractedTextModal } from './ExtractedTextModal';
+export { StampOverlayImage } from './StampOverlayImage';
+export { ScanReviewModal } from './ScanReviewModal';

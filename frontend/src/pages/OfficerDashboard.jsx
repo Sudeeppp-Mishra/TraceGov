@@ -5,7 +5,7 @@ import { api, getStoredUser } from '../lib/api';
 import {
   Container, Card, Button, Input, Select, Textarea, Badge, Modal, Icons,
   StatCard, Skeleton, EmptyState, Timeline, TimelineItem, useToast, Spinner, Tabs,
-  QrScanner, FileActions,
+  QrScanner, FileActions, ExtractedTextModal, StampOverlayImage, ScanReviewModal,
 } from '../components/ui';
 import { AppShell, PageHeading } from '../components/layout';
 
@@ -65,6 +65,19 @@ export default function OfficerDashboard() {
     } finally {
       setFileLoading(false);
     }
+  };
+
+  // Tier-3 #13: optimistic-update a single documentVerifications[] row in place
+  // after the backend's re-OCR endpoint returns. We avoid re-fetching the whole
+  // file (which would lose the officer's open tabs and scroll position).
+  const handleReOcrResult = (idx, updatedDv) => {
+    setSelectedFile((prev) => {
+      if (!prev || !Array.isArray(prev.documentVerifications)) return prev;
+      const nextVerifications = prev.documentVerifications.slice();
+      if (idx < 0 || idx >= nextVerifications.length) return prev;
+      nextVerifications[idx] = { ...nextVerifications[idx], ...updatedDv };
+      return { ...prev, documentVerifications: nextVerifications };
+    });
   };
 
   const loadDashboard = async (wardCode) => {
@@ -500,6 +513,34 @@ export default function OfficerDashboard() {
                   onResolveSuccess={() => handleSelectFile(selectedFile.fileUid)}
                 />
 
+                {/* AI Scan Detail Panel — surfaces persisted OCR metadata on
+                    the registered file. Officers currently lose this signal
+                    once registration completes, so the panel keeps the
+                    classification, stamp detection, name verification,
+                    completeness, and extracted-text preview visible here. */}
+                {Array.isArray(selectedFile.documentVerifications) && selectedFile.documentVerifications.length > 0 && (
+                  <Card>
+                    <div className="flex items-center justify-between gap-2 mb-4">
+                      <h4 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">AI scan detail</h4>
+                      <span className="text-[11px] text-muted-foreground">
+                        {selectedFile.documentVerifications.filter((dv) => dv.status === 'verified').length}/{selectedFile.documentVerifications.length} verified
+                      </span>
+                    </div>
+                    <div className="space-y-2.5">
+                      {selectedFile.documentVerifications.map((dv, idx) => (
+                        <ScanDetailRow
+                          key={`${dv.documentLabel}-${idx}`}
+                          dv={dv}
+                          fileId={selectedFile._id}
+                          idx={idx}
+                          citizenName={selectedFile.citizenName}
+                          onReOcrResult={handleReOcrResult}
+                        />
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
                 <Card>
                   <h4 className="mb-5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Ledger movement history</h4>
                   {selectedFileHistory.length > 0 ? (
@@ -574,3 +615,310 @@ export default function OfficerDashboard() {
     </AppShell>
   );
 }
+
+/* ───────────────────────── AI Scan Detail Row ───────────────────────── */
+
+/**
+ * Renders one persisted document-verification row on the officer dashboard.
+ * Mirrors the structure of `DocumentChecklistItem`'s verbose block but reads
+ * from the saved file state (no live re-scan), and adds a "View extracted text"
+ * disclosure so officers can confirm what AI saw at registration time.
+ *
+ * Tier-3 #13: optionally renders a "Re-run OCR" button that re-invokes the
+ * AI service against the stored imagePreview and atomically updates this
+ * single entry via the `/re-ocr` endpoint.
+ */
+function ScanDetailRow({ dv, fileId, idx, citizenName, onReOcrResult }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const [fullTextOpen, setFullTextOpen] = React.useState(false);
+  const [reviewOpen, setReviewOpen] = React.useState(false);
+  const [reOcrLoading, setReOcrLoading] = React.useState(false);
+  const toast = useToast();
+  const isVerified = dv.status === 'verified';
+  const tone = isVerified ? 'emerald' : 'amber';
+
+  // Tier-3 #12: the persisted row can carry bounding boxes (image path) —
+  // surface them via the same review modal as the registration form.
+  const hasReviewableBoxes = Array.isArray(dv.textBoxes) && dv.textBoxes.length > 0;
+  // Tier-3 #13: re-run OCR against the stored preview; replace this row
+  // in-place rather than re-fetching the whole file.
+  const handleReOcr = async () => {
+    if (!fileId || idx == null || reOcrLoading) return;
+    setReOcrLoading(true);
+    try {
+      const res = await api.reOcrDocument(fileId, idx, {
+        citizenName: citizenName || undefined,
+        // The backend defaults to [dv.documentLabel] when no keywords are
+        // supplied — matches what was used at registration time.
+      });
+      const updated = res?.documentVerification;
+      if (updated && typeof onReOcrResult === 'function') {
+        onReOcrResult(idx, updated);
+        toast.success(`Refreshed OCR for "${dv.documentLabel}".`);
+      } else {
+        toast.error('Re-OCR succeeded but no updated entry was returned.');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Re-OCR failed.');
+    } finally {
+      setReOcrLoading(false);
+    }
+  };
+
+  // Tier-2 #8: persisted full text — server only sends the first ~500 chars
+  // as preview, so we can detect "real" full text by length or mismatch.
+  const hasFullText = !!dv.extractedText && (
+    dv.extractedText.length > 510 || dv.extractedText !== dv.extractedTextPreview
+  );
+
+  // Confidence tier — no `classificationSource` on persisted state, so we
+  // degrade to a two-tier reading: high if completeness ≥0.8 and OCR ≥0.7.
+  const ocr = typeof dv.ocrConfidence === 'number' ? dv.ocrConfidence : 0;
+  const completeness = typeof dv.completenessScore === 'number' ? dv.completenessScore : 0;
+  const tier = ocr < 0.5 || completeness < 0.5
+    ? { label: 'Low', className: 'bg-red-500/10 text-red-700 dark:text-red-300' }
+    : ocr < 0.7 || completeness < 0.8
+      ? { label: 'Medium', className: 'bg-amber-500/10 text-amber-700 dark:text-amber-300' }
+      : { label: 'High', className: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' };
+
+  return (
+    <div className={`rounded-xl border p-3 text-xs transition-colors ${
+      tone === 'emerald' ? 'border-emerald-500/20 bg-emerald-500/[0.03]' : 'border-amber-500/30 bg-amber-500/[0.03]'
+    }`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="font-semibold text-foreground truncate">{dv.documentLabel}</span>
+            {dv.detectedType && (
+              <span className="rounded-md bg-primary/10 px-1.5 py-0.5 font-semibold text-primary">
+                {dv.detectedType} ({Math.round((dv.ocrConfidence || 0) * 100)}%)
+              </span>
+            )}
+            {dv.detectedLanguage && (
+              <span className="rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground">
+                {LANGUAGE_LABELS_DASHBOARD[dv.detectedLanguage] || dv.detectedLanguage}
+              </span>
+            )}
+            {typeof dv.completenessScore === 'number' && (
+              <span className="rounded-md bg-muted px-1.5 py-0.5 font-semibold text-muted-foreground">
+                {Math.round(dv.completenessScore * 100)}% complete
+              </span>
+            )}
+            {tier && (
+              <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${tier.className}`}>
+                {tier.label} confidence
+              </span>
+            )}
+          </div>
+
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {dv.stampAnalysis?.stampDetected ? (
+              <span className="inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+                <span className={`h-2 w-2 rounded-full ${
+                  dv.stampAnalysis.stampColor === 'red' ? 'bg-red-500'
+                  : dv.stampAnalysis.stampColor === 'blue' ? 'bg-blue-500'
+                  : 'bg-purple-500'
+                }`} />
+                {dv.stampAnalysis.stampCount > 1
+                  ? `${dv.stampAnalysis.stampCount} stamps`
+                  : `${dv.stampAnalysis.stampColor || 'official'} stamp`}
+                <span className="text-muted-foreground font-normal">
+                  ({Math.round((dv.stampAnalysis.stampConfidence || 0) * 100)}%)
+                </span>
+              </span>
+            ) : (
+              <span className="text-amber-600/80 dark:text-amber-400/80 font-medium">No stamp</span>
+            )}
+
+            {dv.nameVerification && (
+              dv.nameVerification.nameFound ? (
+                <span className="inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+                  <Icons.User className="h-3 w-3 shrink-0" />
+                  Name found ({Math.round((dv.nameVerification.matchConfidence || 0) * 100)}%)
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-amber-600/80 dark:text-amber-400/80 font-medium">
+                  <Icons.User className="h-3 w-3 shrink-0" />
+                  Name not found
+                </span>
+              )
+            )}
+
+            {dv.scannedAt && (
+              <span className="text-muted-foreground">
+                Scanned {new Date(dv.scannedAt).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+
+          {dv.imagePreview && (
+            <div className="mt-2 space-y-1.5">
+              {/* Tier-3 #14: stamp region overlays — show where the AI service
+                  detected official stamps on the persisted image. */}
+              {dv.stampAnalysis?.stampRegions?.length > 0 ? (
+                <StampOverlayImage
+                  src={dv.imagePreview}
+                  stampAnalysis={dv.stampAnalysis}
+                  alt={`Scan of ${dv.documentLabel}`}
+                  className="h-20 w-20 shrink-0 rounded-md border border-border bg-white shadow-xs"
+                />
+              ) : (
+                <img
+                  src={dv.imagePreview}
+                  alt={`Scan of ${dv.documentLabel}`}
+                  className="h-20 w-20 rounded-md border border-border bg-white object-cover shadow-xs"
+                />
+              )}
+              {/* Tier-3 #15: page thumbnails if this is a multi-page scan. */}
+              {Array.isArray(dv.imagePreviews) && dv.imagePreviews.length > 1 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {dv.imagePreviews.map((p, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setReviewOpen(true)}
+                      className="relative h-9 w-9 shrink-0 overflow-hidden rounded border border-border bg-white shadow-xs cursor-pointer hover:border-border-strong"
+                      title={`Page ${i + 1}`}
+                    >
+                      <img src={p} alt={`Page ${i + 1}`} className="block h-full w-full object-cover" />
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 px-0.5 text-[9px] font-bold text-white leading-tight text-center">
+                        p.{i + 1}
+                      </span>
+                    </button>
+                  ))}
+                  <span className="ml-1 self-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                    {dv.imagePreviews.length} pages
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <Badge
+            status={isVerified ? 'Verified' : 'Pending'}
+          />
+          {/* Tier-3 #13: re-run OCR against the stored preview. Refresh the
+              single entry in place rather than re-registering the file. */}
+          {fileId && idx != null && (
+            <button
+              type="button"
+              onClick={handleReOcr}
+              disabled={reOcrLoading}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors disabled:opacity-60 cursor-pointer"
+              title="Re-run OCR analysis on the stored image and update this row"
+            >
+              {reOcrLoading ? (
+                <>
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                  Re-running...
+                </>
+              ) : (
+                <>
+                  <Icons.Zap className="h-3 w-3" />
+                  Re-run OCR
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {dv.extractedTextPreview && dv.extractedTextPreview !== '(OCR Service Unavailable)' && (
+        <div className="mt-2 rounded-md border border-border bg-background/60">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            aria-expanded={expanded}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Icons.Eye className="h-3 w-3" />
+              {expanded ? 'Hide extracted text' : 'View extracted text'}
+            </span>
+            <Icons.ChevronDown className={`h-3 w-3 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+          {expanded && (
+            <div className="space-y-2 border-t border-border bg-muted/20 p-2">
+              <pre className="max-h-32 overflow-auto text-[11px] leading-relaxed text-foreground whitespace-pre-wrap break-words font-mono">
+                {dv.extractedTextPreview}
+              </pre>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Tier-3 #12: side-by-side review modal — available when
+                    the persisted row carries per-word bounding boxes. */}
+                {hasReviewableBoxes && (
+                  <button
+                    type="button"
+                    onClick={() => setReviewOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+                  >
+                    <Icons.Eye className="h-3 w-3" />
+                    Open review
+                    <span className="text-muted-foreground font-normal">
+                      ({dv.textBoxes.length} words)
+                    </span>
+                  </button>
+                )}
+                {hasFullText && (
+                  <button
+                    type="button"
+                    onClick={() => setFullTextOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+                  >
+                    <Icons.FileText className="h-3 w-3" />
+                    Read full text
+                    <span className="text-muted-foreground font-normal">
+                      ({dv.extractedText.length.toLocaleString()} chars)
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tier-2 #8: full extracted-text modal, opened by the "Read full text"
+          button when the persisted dv contains the full OCR string. */}
+      {hasFullText && (
+        <ExtractedTextModal
+          open={fullTextOpen}
+          onClose={() => setFullTextOpen(false)}
+          documentLabel={dv.documentLabel}
+          text={dv.extractedText}
+        />
+      )}
+
+      {/* Tier-3 #12: side-by-side review modal — opened by the
+          "Open review" button when the persisted row carries bounding boxes.
+          Pass `foundKeywords` / `missingKeywords` so the right column
+          in-place highlights which required keywords the AI saw vs. missed. */}
+      {hasReviewableBoxes && (
+        <ScanReviewModal
+          open={reviewOpen}
+          onClose={() => setReviewOpen(false)}
+          documentLabel={dv.documentLabel}
+          imagePreview={dv.imagePreview}
+          imagePreviews={Array.isArray(dv.imagePreviews) && dv.imagePreviews.length > 0
+            ? dv.imagePreviews
+            : (dv.imagePreview ? [dv.imagePreview] : [])}
+          pages={Array.isArray(dv.pages) ? dv.pages : []}
+          textBoxes={dv.textBoxes}
+          imageWidth={dv.imageWidth}
+          imageHeight={dv.imageHeight}
+          extractedText={dv.extractedText || dv.extractedTextPreview || ''}
+          foundKeywords={Array.isArray(dv.foundKeywords) ? dv.foundKeywords : []}
+          missingKeywords={Array.isArray(dv.missingKeywords) ? dv.missingKeywords : []}
+        />
+      )}
+    </div>
+  );
+}
+
+const LANGUAGE_LABELS_DASHBOARD = {
+  nepali: 'Nepali',
+  english: 'English',
+  mixed: 'Mixed',
+  unknown: 'Unknown',
+};

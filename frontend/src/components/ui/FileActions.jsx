@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../../lib/api';
 import { Button, Card, Icons, Input, Modal, Select, Tabs, Textarea } from '.';
 
@@ -45,6 +45,17 @@ export function FileActions({
   const [docScanError, setDocScanError] = useState('');
 
   const isScanVerified = scannedVia === 'webcam' || scannedVia === 'mobile';
+
+  // When the officer clicks "Edit / Resolve" without QR verification, we open the
+  // scanner first. This ref remembers that intent so we auto-open the resolve modal
+  // as soon as the scan succeeds, instead of dumping the officer back to the page.
+  const pendingResolveRef = useRef(false);
+  useEffect(() => {
+    if (isScanVerified && pendingResolveRef.current) {
+      pendingResolveRef.current = false;
+      setIsResolveModalOpen(true);
+    }
+  }, [isScanVerified]);
   const isClosed = ['Dispatched', 'Approved', 'Rejected'].includes(selectedFile?.currentStatus);
   const isInTransit = selectedFile?.currentStatus === 'In Transit';
 
@@ -282,49 +293,7 @@ export function FileActions({
               size="sm"
               onClick={() => {
                 if (!isScanVerified) {
-                  setManualReasonError('Physical QR scan required! Please scan the envelope QR tag first to verify custody before editing/resolving documents.');
-                  onScanClick();
-                  return;
-                }
-                setIsResolveModalOpen(true);
-              }}
-              className="shrink-0 shadow-sm"
-            >
-              <Icons.FileText className="h-3.5 w-3.5" /> Edit / Resolve Missing Documents
-            </Button>
-          </div>
-          <ul className="flex flex-wrap gap-1.5 pt-1">
-            {missingDocs.map((doc) => (
-              <li key={doc} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-950 dark:text-amber-100">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
-                {doc}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Missing Required Documents Alert Banner & Edit Modal Trigger */}
-      {hasMissingDocs && !isClosed && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-start gap-2.5">
-              <Icons.AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
-              <div>
-                <strong className="text-sm font-bold text-amber-950 dark:text-amber-100">
-                  Routing Blocked — Remaining Required Document(s) Needed ({missingDocs.length})
-                </strong>
-                <p className="text-xs text-amber-900/80 dark:text-amber-300/80 mt-0.5">
-                  Forwarding and backtracking are locked until missing required checklist item(s) are submitted and verified by the officer.
-                </p>
-              </div>
-            </div>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                if (!isScanVerified) {
-                  setManualReasonError('Physical QR scan required! Please scan the envelope QR tag first to verify custody before editing/resolving documents.');
+                  pendingResolveRef.current = true;
                   onScanClick();
                   return;
                 }
@@ -354,7 +323,9 @@ export function FileActions({
               <Icons.Clock className="h-5 w-5" />
             </div>
             <div>
-              <h4 className="text-sm font-bold text-foreground">File in transit to {selectedFile.targetLocation || 'your desk'}</h4>
+              <h4 className="text-sm font-bold text-foreground">
+                File in transit to {selectedFile.targetLocation || 'your desk'}
+              </h4>
               <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                 Sent from <strong>{selectedFile.currentLocation}</strong>. Physical receipt confirmation is required before any forward or backtrack routing can be performed.
               </p>
@@ -407,204 +378,235 @@ export function FileActions({
         <>
           <Tabs tabs={tabs} active={actionTab} onChange={setActionTab} />
 
-      {/* Manual Action Bypass Reason Box */}
-      {!isScanVerified && !isClosed && actionTab !== 'ai' && (
-        <div className="space-y-1.5 p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5">
-          <label htmlFor="manual_reason_input" className="block text-xs font-semibold text-amber-900 dark:text-amber-200">
-            Mandatory manual update reason <span className="text-red-500">*</span>
-          </label>
-          <Input
-            id="manual_reason_input"
-            placeholder="e.g. QR code damaged, Camera unavailable, Bulk processing"
-            value={manualReason}
-            onChange={(e) => {
-              setManualReason(e.target.value);
-              if (e.target.value.trim()) setManualReasonError('');
-            }}
-            required
-            className="bg-background text-xs"
-          />
-          {manualReasonError && (
-            <p className="text-xs font-semibold text-red-500 mt-1">{manualReasonError}</p>
-          )}
-        </div>
-      )}
-
-      {/* In Transit Receive Card */}
-      {isInTransit && (
-        isTargetDeskForCurrentOfficer ? (
-          <div className="space-y-4 p-4 rounded-xl border border-primary/20 bg-primary/5">
-            <div className="flex items-start gap-3">
-              <Icons.Clock className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-              <div>
-                <h4 className="text-sm font-bold text-foreground">File in transit to your desk ({selectedFile.targetLocation})</h4>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Sent from <strong>{selectedFile.currentLocation}</strong>. Confirm physical receipt via QR scan (or manual ID confirm) to receive into your active desk queue.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
-              <Button
-                variant="primary"
-                size="md"
-                onClick={onScanClick}
-                className="w-full sm:w-auto shadow-sm"
-                loading={actionLoading}
-              >
-                <Icons.Scan className="h-4 w-4" /> Scan QR to Confirm Receipt
-              </Button>
-              {!isScanVerified && (
-                <Button
-                  variant="outline"
-                  size="md"
-                  onClick={handleReceive}
-                  className="w-full sm:w-auto"
-                  loading={actionLoading}
-                >
-                  Confirm Receipt Manually
-                </Button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
-            <div className="flex items-start gap-3">
-              <Icons.CheckCircle className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
-              <div>
-                <h4 className="text-sm font-bold text-emerald-950 dark:text-emerald-100">
-                  File forwarded & currently in transit
-                </h4>
-                <p className="text-xs text-emerald-900/80 dark:text-emerald-300/80 mt-0.5">
-                  This file has been forwarded to <strong>{selectedFile.targetLocation || 'destination desk'}</strong>. Your desk work is complete. Awaiting physical receipt confirmation by receiving officer at {selectedFile.targetLocation}.
-                </p>
-              </div>
-            </div>
-          </div>
-        )
-      )}
-
-      {actionTab === 'forward' && !isClosed && !isInTransit && (
-        <form onSubmit={handleForward} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Select
-              label="Target desk"
-              id="f_loc"
-              value={nextLocation}
-              onChange={(e) => setNextLocation(e.target.value)}
-              required={!['Approved', 'Dispatched'].includes(nextStatus)}
-            >
-              <option value="">Choose desk…</option>
-              {departmentsList
-                .filter((d) => d.isActive)
-                .map((d) => (
-                  <option key={d.name} value={d.name}>
-                    {d.name}
-                  </option>
-                ))}
-            </Select>
-            <Select
-              label="Update file status"
-              id="f_status"
-              value={nextStatus}
-              onChange={(e) => setNextStatus(e.target.value)}
-              required
-            >
-              <option value="Pending">Pending (Under routing)</option>
-              <option value="Under Review">Under Review (Details verification)</option>
-              <option value="Verified">Verified (Verification complete)</option>
-              <option value="Approved">Approved (Final endorsement)</option>
-              <option value="Dispatched">Dispatched (Closed / Archiving)</option>
-            </Select>
-          </div>
-
-          <Textarea
-            label="Routing notes"
-            id="f_notes"
-            rows={2}
-            placeholder="e.g. Verification complete, forwarding for final endorsement."
-            value={routingNotes}
-            onChange={(e) => setRoutingNotes(e.target.value)}
-          />
-
-          {hasMissingDocs && (
-            <div className="space-y-1.5 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs">
-              <p className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1">
-                <Icons.AlertCircle className="h-4 w-4 text-amber-600 shrink-0" /> File has missing required document(s): {missingDocs.join(', ')}
-              </p>
-              <p className="text-amber-800/80 dark:text-amber-300/80">
-                To forward before resolving attachments, enter an official Officer Override reason (logged to audit ledger):
-              </p>
+          {/* Manual Action Bypass Reason Box */}
+          {!isScanVerified && !isClosed && actionTab !== 'ai' && (
+            <div className="space-y-1.5 p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5">
+              <label htmlFor="manual_reason_input" className="block text-xs font-semibold text-amber-900 dark:text-amber-200">
+                Mandatory manual update reason <span className="text-red-500">*</span>
+              </label>
               <Input
-                id="forward_override_reason"
-                placeholder="e.g. Approved verbal exemption by Ward Chair"
-                value={overrideReason}
-                onChange={(e) => setOverrideReason(e.target.value)}
+                id="manual_reason_input"
+                placeholder="e.g. QR code damaged, Camera unavailable, Bulk processing"
+                value={manualReason}
+                onChange={(e) => {
+                  setManualReason(e.target.value);
+                  if (e.target.value.trim()) setManualReasonError('');
+                }}
+                required
                 className="bg-background text-xs"
               />
+              {manualReasonError && (
+                <p className="text-xs font-semibold text-red-500 mt-1">{manualReasonError}</p>
+              )}
             </div>
           )}
 
-          <div className="flex justify-end">
-            <Button type="submit" variant="primary" loading={actionLoading}>
-              Confirm forward <Icons.ArrowRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </form>
+          {actionTab === 'forward' && !isClosed && (
+            <form onSubmit={handleForward} className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Select
+                  label="Target desk"
+                  id="f_loc"
+                  value={nextLocation}
+                  onChange={(e) => setNextLocation(e.target.value)}
+                  required={!['Approved', 'Dispatched'].includes(nextStatus)}
+                >
+                  <option value="">Choose desk…</option>
+                  {departmentsList
+                    .filter((d) => d.isActive)
+                    .map((d) => (
+                      <option key={d.name} value={d.name}>
+                        {d.name}
+                      </option>
+                    ))}
+                </Select>
+                <Select
+                  label="Update file status"
+                  id="f_status"
+                  value={nextStatus}
+                  onChange={(e) => setNextStatus(e.target.value)}
+                  required
+                >
+                  <option value="Pending">Pending (Under routing)</option>
+                  <option value="Under Review">Under Review (Details verification)</option>
+                  <option value="Verified">Verified (Verification complete)</option>
+                  <option value="Approved">Approved (Final endorsement)</option>
+                  <option value="Dispatched">Dispatched (Closed / Archiving)</option>
+                </Select>
+              </div>
+
+              <Textarea
+                label="Routing notes"
+                id="f_notes"
+                rows={2}
+                placeholder="e.g. Verification complete, forwarding for final endorsement."
+                value={routingNotes}
+                onChange={(e) => setRoutingNotes(e.target.value)}
+              />
+
+              {hasMissingDocs && (
+                <div className="space-y-1.5 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs">
+                  <p className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1">
+                    <Icons.AlertCircle className="h-4 w-4 text-amber-600 shrink-0" /> File has missing required document(s): {missingDocs.join(', ')}
+                  </p>
+                  <p className="text-amber-800/80 dark:text-amber-300/80">
+                    To forward before resolving attachments, enter an official Officer Override reason (logged to audit ledger):
+                  </p>
+                  <Input
+                    id="forward_override_reason"
+                    placeholder="e.g. Approved verbal exemption by Ward Chair"
+                    value={overrideReason}
+                    onChange={(e) => setOverrideReason(e.target.value)}
+                    className="bg-background text-xs"
+                  />
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button type="submit" variant="primary" loading={actionLoading}>
+                  Confirm forward <Icons.ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {actionTab === 'backtrack' && !isClosed && (
+            <form onSubmit={handleBacktrack} className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Select
+                  label="Return to desk"
+                  id="b_loc"
+                  value={backtrackLocation}
+                  onChange={(e) => setBacktrackLocation(e.target.value)}
+                  required
+                >
+                  <option value="">Choose desk…</option>
+                  {departmentsList
+                    .filter((d) => d.isActive)
+                    .map((d) => (
+                      <option key={d.name} value={d.name}>
+                        {d.name}
+                      </option>
+                    ))}
+                </Select>
+                <Input
+                  label="Reason (visible to citizen)"
+                  id="b_reason"
+                  placeholder="e.g. Missing ward form stamp."
+                  value={backtrackReason}
+                  onChange={(e) => setBacktrackReason(e.target.value)}
+                  required
+                />
+              </div>
+
+              <Textarea
+                label="Internal notes (hidden from citizens)"
+                id="b_int"
+                rows={2}
+                placeholder="e.g. Verify citizen ID against database records."
+                value={internalNotes}
+                onChange={(e) => setInternalNotes(e.target.value)}
+              />
+
+              <div className="flex justify-end">
+                <Button type="submit" variant="danger" loading={actionLoading}>
+                  Confirm backtrack
+                </Button>
+              </div>
+            </form>
+          )}
+        </>
       )}
 
       {/* Edit / Resolve Missing Documents Modal */}
       <Modal
         isOpen={isResolveModalOpen}
         onClose={() => setIsResolveModalOpen(false)}
-        title="Edit / Resolve Missing Documents"
-        description="Verify remaining physical attachments or upload scans to complete the document checklist."
+        title="Resolve Missing Attachments"
+        description={`${missingDocs.length} required document${missingDocs.length > 1 ? 's' : ''} pending verification for ${selectedFile?.title || 'this file'}.`}
       >
-        <div className="space-y-4">
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-950 dark:text-amber-100">
-            <p className="font-bold flex items-center gap-1.5 mb-2">
-              <Icons.AlertCircle className="h-4 w-4 text-amber-600 shrink-0" /> Select missing item to upload/verify:
-            </p>
-            <div className="space-y-2">
-              {missingDocs.map((doc) => (
-                <div key={doc} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 rounded-lg border border-amber-500/20 bg-background">
-                  <span className="font-semibold text-foreground text-xs">{doc}</span>
-                  <label className="flex items-center gap-1.5 cursor-pointer rounded-md bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors shrink-0">
-                    <Icons.Upload className="h-3.5 w-3.5" /> Upload Scan
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleDocFileChangeForItem(doc, file);
-                        e.target.value = '';
-                      }}
-                      disabled={docScanning}
-                    />
-                  </label>
-                </div>
-              ))}
+        <div className="space-y-5">
+          {/* Progress Indicator */}
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 font-bold text-sm tabular-nums">
+              {missingDocs.length}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Pending document{missingDocs.length > 1 ? 's' : ''}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Upload a scan or photo for each item below to complete verification.</p>
             </div>
           </div>
 
+          {/* Document Items */}
+          <div className="space-y-2.5">
+            {missingDocs.map((doc, idx) => (
+              <div key={doc} className="group flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-3.5 transition-colors hover:border-primary/30 hover:bg-primary/[0.02]">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs font-bold tabular-nums">
+                    {idx + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{doc}</p>
+                    <p className="text-[11px] text-muted-foreground">Not uploaded</p>
+                  </div>
+                </div>
+                <label className="flex items-center gap-1.5 cursor-pointer rounded-lg border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 transition-all shrink-0 shadow-xs">
+                  <Icons.Upload className="h-3.5 w-3.5" /> Upload
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleDocFileChangeForItem(doc, file);
+                      e.target.value = '';
+                    }}
+                    disabled={docScanning}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+
+          {/* Scan Preview */}
           {docScanPreview && (
-            <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 p-3">
-              <img src={docScanPreview} alt="Missing doc scan" className="h-16 w-16 rounded-lg border bg-white object-cover shadow-xs" />
-              <div className="min-w-0 flex-1 text-xs">
+            <div className="flex items-center gap-4 rounded-xl border border-border bg-muted/20 p-4">
+              <img src={docScanPreview} alt="Scanned attachment" className="h-20 w-20 rounded-xl border border-border bg-white object-cover shadow-sm" />
+              <div className="min-w-0 flex-1">
                 {docScanning ? (
-                  <p className="text-muted-foreground italic animate-pulse">Scanning document with AI OCR…</p>
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                    <p className="text-xs font-medium text-muted-foreground">Running AI document analysis…</p>
+                  </div>
                 ) : docScanResult ? (
-                  <p className="font-semibold text-emerald-600">✓ AI OCR scan complete ({docScanResult.documentType || 'Verified'})</p>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-emerald-600 flex items-center gap-1.5">
+                      <Icons.CheckCircle className="h-4 w-4" /> Scan verified
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Detected: {docScanResult.documentType || 'Document'} · Confidence: {Math.round((docScanResult.ocrConfidence || 0.9) * 100)}%
+                    </p>
+                    {docScanResult.stampAnalysis?.stampDetected && (
+                      <p className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-600">
+                        <span className={`inline-block h-2 w-2 rounded-full ${
+                          docScanResult.stampAnalysis.stampColor === 'red' ? 'bg-red-500'
+                          : docScanResult.stampAnalysis.stampColor === 'blue' ? 'bg-blue-500'
+                          : 'bg-purple-500'
+                        }`} />
+                        Official {docScanResult.stampAnalysis.stampColor} stamp · {Math.round(docScanResult.stampAnalysis.stampConfidence * 100)}%
+                      </p>
+                    )}
+                  </div>
                 ) : (
-                  <p className="text-muted-foreground">{docScanError || 'Attachment ready for verification'}</p>
+                  <p className="text-xs text-muted-foreground">{docScanError || 'Photo attached — ready for officer verification.'}</p>
                 )}
               </div>
             </div>
           )}
 
+          {/* Officer Notes */}
           <Textarea
-            label="Officer verification notes"
+            label="Officer verification notes (optional)"
             id="resolve_notes"
             rows={2}
             placeholder="e.g. Received original physical copy at Reception desk."
@@ -612,62 +614,17 @@ export function FileActions({
             onChange={(e) => setResolveNotes(e.target.value)}
           />
 
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setIsResolveModalOpen(false)}>
+          {/* Actions */}
+          <div className="flex items-center justify-between gap-3 pt-1 border-t border-border">
+            <Button variant="ghost" size="sm" onClick={() => setIsResolveModalOpen(false)} className="text-muted-foreground">
               Cancel
             </Button>
-            <Button variant="primary" loading={resolveLoading} onClick={handleConfirmResolve}>
-              <Icons.CheckCircle className="h-4 w-4" /> Mark missing documents as verified
+            <Button variant="primary" loading={resolveLoading} onClick={handleConfirmResolve} className="shadow-sm">
+              <Icons.CheckCircle className="h-4 w-4" /> Confirm & Verify All
             </Button>
           </div>
         </div>
       </Modal>
-
-      {actionTab === 'backtrack' && !isClosed && !isInTransit && (
-        <form onSubmit={handleBacktrack} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Select
-              label="Return to desk"
-              id="b_loc"
-              value={backtrackLocation}
-              onChange={(e) => setBacktrackLocation(e.target.value)}
-              required
-            >
-              <option value="">Choose desk…</option>
-              {departmentsList
-                .filter((d) => d.isActive)
-                .map((d) => (
-                  <option key={d.name} value={d.name}>
-                    {d.name}
-                  </option>
-                ))}
-            </Select>
-            <Input
-              label="Reason (visible to citizen)"
-              id="b_reason"
-              placeholder="e.g. Missing ward form stamp."
-              value={backtrackReason}
-              onChange={(e) => setBacktrackReason(e.target.value)}
-              required
-            />
-          </div>
-
-          <Textarea
-            label="Internal notes (hidden from citizens)"
-            id="b_int"
-            rows={2}
-            placeholder="e.g. Verify citizen ID against database records."
-            value={internalNotes}
-            onChange={(e) => setInternalNotes(e.target.value)}
-          />
-
-          <div className="flex justify-end">
-            <Button type="submit" variant="danger" loading={actionLoading}>
-              Confirm backtrack
-            </Button>
-          </div>
-        </form>
-      )}
     </Card>
   );
 }

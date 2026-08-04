@@ -157,6 +157,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  reOcrDocument: (fileId, idx, payload) =>
+    request(`/files/${fileId}/document-verifications/${idx}/re-ocr`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   estimateCompletion: (trackingId) =>
     request('/ai/estimate-completion', {
       method: 'POST',

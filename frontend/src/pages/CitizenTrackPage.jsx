@@ -160,8 +160,10 @@ function ProgressRail({ file }) {
 // citizen actually needs — where the file is, when to expect progress, and
 // whether they must do anything.
 function StatusCard({ fileDetails, aiEstimate, autoRefresh, onAutoRefreshChange }) {
-  const missingDocs = fileDetails.documentVerification?.missingKeywords || fileDetails.documentVerification?.missingDocuments || [];
-  const hasMissingDocs = missingDocs.length > 0;
+  const missingDocs = (Array.isArray(fileDetails.documentVerifications) && fileDetails.documentVerifications.length > 0)
+    ? fileDetails.documentVerifications.filter((dv) => dv.status !== 'verified').map((dv) => dv.documentLabel)
+    : (fileDetails.missingDocuments || fileDetails.documentVerification?.missingKeywords || fileDetails.documentVerification?.missingDocuments || []);
+  const hasMissingDocs = missingDocs.length > 0 || fileDetails.verificationStatus === 'missing-documents';
 
   const statusCopy = getStatusCopy(fileDetails.currentStatus);
   const latestReason = getLatestReason(fileDetails.timeline);

@@ -44,6 +44,7 @@ export async function registerFile(req, res, next) {
       requiredDocuments = [],
       internalNotes,
       documentVerification,
+      documentVerifications = [],
     } = req.body;
 
     if (!title || !citizenName || !citizenPhone || !documentType) {
@@ -85,6 +86,48 @@ export async function registerFile(req, res, next) {
     // Generate QR payload and image base64 data url
     const { payload, dataUrl } = await generateQrCode(fileUid, wardCode);
 
+    // Determine overall verification status and explicit list of missing document labels
+    let verificationStatus = 'unverified';
+    const missingDocs = [];
+
+    if (Array.isArray(documentVerifications) && documentVerifications.length > 0) {
+      documentVerifications.forEach((dv) => {
+        if (dv.status !== 'verified' || (dv.missingKeywords && dv.missingKeywords.length > 0)) {
+          if (dv.documentLabel && !missingDocs.includes(dv.documentLabel)) {
+            missingDocs.push(dv.documentLabel);
+          }
+        }
+      });
+
+      if (Array.isArray(requiredDocuments)) {
+        requiredDocuments.forEach((reqDoc) => {
+          const match = documentVerifications.find(
+            (dv) => dv.documentLabel?.toLowerCase().trim() === reqDoc.toLowerCase().trim()
+          );
+          if (!match || match.status !== 'verified') {
+            if (!missingDocs.includes(reqDoc)) {
+              missingDocs.push(reqDoc);
+            }
+          }
+        });
+      }
+
+      verificationStatus = missingDocs.length > 0 ? 'missing-documents' : 'complete';
+    } else if (documentVerification) {
+      const legacyMissing = documentVerification.missingKeywords || documentVerification.missingDocuments || [];
+      if (legacyMissing.length > 0) {
+        missingDocs.push(...legacyMissing);
+        verificationStatus = 'missing-documents';
+      } else {
+        verificationStatus = 'complete';
+      }
+    } else if (Array.isArray(requiredDocuments) && requiredDocuments.length > 0) {
+      missingDocs.push(...requiredDocuments);
+      verificationStatus = 'missing-documents';
+    } else {
+      verificationStatus = 'complete';
+    }
+
     const file = await File.create({
       fileUid,
       trackingId,
@@ -101,6 +144,7 @@ export async function registerFile(req, res, next) {
       qrDataUrl: dataUrl,
       requiredDocuments,
       internalNotes,
+      verificationStatus,
       documentVerification: documentVerification ? {
         scannedAt: new Date(),
         detectedType: documentVerification.detectedType || documentVerification.documentType,
@@ -109,9 +153,23 @@ export async function registerFile(req, res, next) {
         completenessScore: documentVerification.completenessScore,
         detectedLanguage: documentVerification.detectedLanguage,
         isQualityPassed: documentVerification.isQualityPassed ?? true,
-        missingKeywords: documentVerification.missingKeywords || [],
-        missingDocuments: documentVerification.missingDocuments || documentVerification.missingKeywords || [],
+        missingKeywords: missingDocs,
+        missingDocuments: missingDocs,
       } : undefined,
+      documentVerifications: Array.isArray(documentVerifications) ? documentVerifications.map((dv) => ({
+        documentLabel: dv.documentLabel || 'Attachment',
+        imagePreview: dv.imagePreview || null,
+        scannedAt: dv.scannedAt || new Date(),
+        detectedType: dv.detectedType || null,
+        ocrConfidence: dv.ocrConfidence || 0,
+        qualityScore: dv.qualityScore || 0.85,
+        completenessScore: dv.completenessScore || 0,
+        detectedLanguage: dv.detectedLanguage || 'unknown',
+        isQualityPassed: dv.isQualityPassed ?? true,
+        missingKeywords: dv.missingKeywords || [],
+        status: dv.status || 'unverified',
+        extractedTextPreview: dv.extractedTextPreview || null,
+      })) : [],
     });
 
     // Write initial log to immutable ledger
@@ -120,7 +178,9 @@ export async function registerFile(req, res, next) {
       officerId: req.user._id,
       actionType: FILE_STATUSES.RECEIVED,
       currentLocation,
-      notes: `File registered: ${title}`,
+      notes: missingDocs.length > 0 
+        ? `File registered (Missing ${missingDocs.length} document(s)): ${title}`
+        : `File registered: ${title}`,
     });
 
     // Notify citizen via SMS on initial registration status
@@ -128,10 +188,10 @@ export async function registerFile(req, res, next) {
       file,
       status: FILE_STATUSES.RECEIVED,
       location: currentLocation,
+      missingDocuments: missingDocs,
     });
 
     // Notify citizen via Email if email address was provided
-    const missingDocs = (documentVerification?.missingKeywords || documentVerification?.missingDocuments || []);
     const emailResult = await sendEmailNotification({
       file,
       status: FILE_STATUSES.RECEIVED,
@@ -153,7 +213,12 @@ export async function registerFile(req, res, next) {
         currentLocation: file.currentLocation,
         qrPayload: file.qrPayload,
         qrDataUrl: file.qrDataUrl,
+        verificationStatus: file.verificationStatus,
+        missingDocuments: missingDocs,
+        documentVerifications: file.documentVerifications,
       },
+      missingDocuments: missingDocs,
+      verificationStatus: file.verificationStatus,
       smsNotified: smsResult?.success ?? false,
       emailNotified: emailResult?.success ?? false,
       citizenTrackingUrl: `/track/${file.trackingId}`,
@@ -519,15 +584,40 @@ async function sendFileCore(req, res, next, { direction, targetLocation, nextSta
         if (archiveDesk) destinationDesk = archiveDesk.name;
       }
 
-      // Block sending if required documents are missing
-      const missingList = file.documentVerification?.missingKeywords || file.documentVerification?.missingDocuments || [];
-      if (missingList.length > 0) {
-        throw new Error(`MISSING_DOCS:${missingList.join(', ')}`);
+      // Determine missing documents from per-document verifications and legacy fields
+      const missingList = [];
+      if (Array.isArray(file.documentVerifications) && file.documentVerifications.length > 0) {
+        file.documentVerifications.forEach((dv) => {
+          if (dv.status !== 'verified' || (dv.missingKeywords && dv.missingKeywords.length > 0)) {
+            if (dv.documentLabel && !missingList.includes(dv.documentLabel)) {
+              missingList.push(dv.documentLabel);
+            }
+          }
+        });
+      }
+      if (missingList.length === 0) {
+        const legacyMissing = file.documentVerification?.missingKeywords || file.documentVerification?.missingDocuments || [];
+        missingList.push(...legacyMissing);
+      }
+
+      const overrideReason = (req.body.overrideReason || req.body.remarks || '').trim();
+      const hasIncompleteDocs = missingList.length > 0 || file.verificationStatus === 'missing-documents';
+
+      // Gate forwarding: block if incomplete, unless officer explicitly provides an override reason
+      if (direction === 'forward' && hasIncompleteDocs) {
+        if (!overrideReason) {
+          throw new Error(`MISSING_DOCS:${missingList.join(', ')}`);
+        }
       }
 
       file.targetLocation = destinationDesk;
       file.currentStatus = FILE_STATUSES.IN_TRANSIT;
       await file.save({ session });
+
+      let logNote = notes || (direction === 'backtrack' ? `Returned for correction: ${backtrackReason}` : `Forwarded to ${destinationDesk}`);
+      if (direction === 'forward' && hasIncompleteDocs && overrideReason) {
+        logNote = `[FORWARD OVERRIDE - INCOMPLETE DOCS (${missingList.join(', ')})]: ${overrideReason}${notes ? ' — ' + notes : ''}`;
+      }
 
       // Dispatch Log Entry #1 (Send Event)
       const logEntry = await appendMovementLog({
@@ -537,7 +627,7 @@ async function sendFileCore(req, res, next, { direction, targetLocation, nextSta
         currentLocation: previousLocation,
         previousLocation,
         nextLocation: destinationDesk,
-        notes: notes || (direction === 'backtrack' ? `Returned for correction: ${backtrackReason}` : `Forwarded to ${destinationDesk}`),
+        notes: logNote,
         backtrackReason: direction === 'backtrack' ? backtrackReason : undefined,
         internalNotes,
         scannedVia: 'manual',
@@ -606,15 +696,34 @@ async function sendFileCore(req, res, next, { direction, targetLocation, nextSta
  */
 export async function resolveMissingDocuments(req, res, next) {
   try {
-    const { documentVerification, resolvedKeywords = [], notes } = req.body;
+    const { documentVerification, documentVerifications, resolvedKeywords = [], notes } = req.body;
 
     const file = await File.findById(req.params.id);
     if (!file) {
       return res.status(404).json({ error: 'File not found' });
     }
 
+    if (Array.isArray(documentVerifications) && documentVerifications.length > 0) {
+      file.documentVerifications = documentVerifications.map((dv) => ({
+        documentLabel: dv.documentLabel || 'Attachment',
+        imagePreview: dv.imagePreview || null,
+        scannedAt: dv.scannedAt || new Date(),
+        detectedType: dv.detectedType || null,
+        ocrConfidence: dv.ocrConfidence || 0.9,
+        qualityScore: dv.qualityScore || 0.85,
+        completenessScore: dv.completenessScore || 1.0,
+        detectedLanguage: dv.detectedLanguage || 'np',
+        isQualityPassed: dv.isQualityPassed ?? true,
+        missingKeywords: dv.missingKeywords || [],
+        status: dv.status || 'verified',
+        extractedTextPreview: dv.extractedTextPreview || null,
+      }));
+    }
+
     const existingVerification = file.documentVerification || {};
-    const currentMissing = existingVerification.missingKeywords || existingVerification.missingDocuments || [];
+    const currentMissing = (file.documentVerifications && file.documentVerifications.length > 0)
+      ? file.documentVerifications.filter((dv) => dv.status !== 'verified').map((dv) => dv.documentLabel)
+      : (existingVerification.missingKeywords || existingVerification.missingDocuments || []);
 
     let remainingMissing = [];
     if (resolvedKeywords && resolvedKeywords.length > 0) {
@@ -622,10 +731,12 @@ export async function resolveMissingDocuments(req, res, next) {
         (kw) => !resolvedKeywords.some((r) => r.toLowerCase().trim() === kw.toLowerCase().trim())
       );
     } else {
-      remainingMissing = [];
+      remainingMissing = currentMissing;
     }
 
     const isFullyResolved = remainingMissing.length === 0;
+
+    file.verificationStatus = isFullyResolved ? 'complete' : 'missing-documents';
 
     file.documentVerification = {
       ...existingVerification,
@@ -650,6 +761,7 @@ export async function resolveMissingDocuments(req, res, next) {
       notes: notes || (isFullyResolved ? 'All required physical document(s) verified by officer. Application processing resumed.' : `Updated missing documents checklist. Remaining: ${remainingMissing.join(', ')}`),
     });
 
+    // Notify citizen via Email on resolution of missing documents
     const emailResult = await sendEmailNotification({
       file,
       status: isFullyResolved ? 'Document Verified' : file.currentStatus,
@@ -658,12 +770,20 @@ export async function resolveMissingDocuments(req, res, next) {
       missingDocuments: remainingMissing,
     });
 
+    const smsResult = await sendSmsNotification({
+      file,
+      status: isFullyResolved ? 'Document Verified' : file.currentStatus,
+      location: file.currentLocation,
+      notes: isFullyResolved ? 'All required documents verified. Processing resumed.' : undefined,
+    });
+
     return res.json({
       success: true,
       file,
       remainingMissing,
       isFullyResolved,
       emailNotified: emailResult?.success ?? false,
+      smsNotified: smsResult?.success ?? false,
     });
   } catch (err) {
     next(err);

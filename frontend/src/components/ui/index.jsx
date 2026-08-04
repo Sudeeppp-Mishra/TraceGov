@@ -793,6 +793,7 @@ export const Icons = {
   Trash: mk(<path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-1 0v12M9 7v12M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13" />),
   Grid: mk(<path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z" />),
   TrendingUp: mk(<path d="M3 17l6-6 4 4 8-8m0 0h-5m5 0v5" />),
+  RefreshCw: mk(<path d="M20 11A8.1 8.1 0 004.5 9M4 5v4h4m-4 6a8.1 8.1 0 0015.5 2m.5 4v-4h-4" />),
 };
 
 export { QrScanner } from './QrScanner';

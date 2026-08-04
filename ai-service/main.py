@@ -45,9 +45,11 @@ app.add_middleware(
 
 
 class AnalyzeDocumentRequest(BaseModel):
-    imageBase64: str | None = None
+    imageBase64: str | list[str] | None = None
     requiredKeywords: list[str] = Field(default_factory=lambda: DEFAULT_KEYWORDS.copy())
     detectedText: str | None = None
+    citizenName: str | None = None
+    citizenNameNepali: str | None = None
 
 
 class MovementEntry(BaseModel):
@@ -103,18 +105,206 @@ def health():
 @app.post("/analyze-document")
 def analyze_document(request: AnalyzeDocumentRequest):
     keywords = request.requiredKeywords or DEFAULT_KEYWORDS
+    name_kwargs = {
+        "citizen_name": request.citizenName,
+        "citizen_name_nepali": request.citizenNameNepali,
+    }
 
     if request.detectedText:
-        return run_full_ocr_analysis(keywords=keywords, detected_text=request.detectedText)
+        return run_full_ocr_analysis(keywords=keywords, detected_text=request.detectedText, **name_kwargs)
 
     if request.imageBase64:
-        raw = request.imageBase64
-        if "," in raw:
-            raw = raw.split(",", 1)[1]
-        image_bytes = base64.b64decode(raw)
-        return run_full_ocr_analysis(image_bytes=image_bytes, keywords=keywords)
+        # Tier-3 #15: multi-page support. imageBase64 may now be either a
+        # single base64 string or a list of base64 strings (one per page).
+        # We OCR each page sequentially, then merge the results into a single
+        # response with per-page breakdowns so the frontend can render tabs.
+        images = request.imageBase64 if isinstance(request.imageBase64, list) else [request.imageBase64]
+        if len(images) == 0:
+            return {"error": "imageBase64 list is empty"}
+        if len(images) == 1:
+            raw = images[0]
+            if "," in raw:
+                raw = raw.split(",", 1)[1]
+            image_bytes = base64.b64decode(raw)
+            result = run_full_ocr_analysis(image_bytes=image_bytes, keywords=keywords, **name_kwargs)
+            result["pageCount"] = 1
+            result["pages"] = [
+                {
+                    "pageIndex": 0,
+                    "extractedTextPreview": result.get("extractedTextPreview", ""),
+                    "extractedText": result.get("extractedText", ""),
+                    "completenessScore": result.get("completenessScore", 0),
+                    "ocrConfidence": result.get("ocrConfidence", 0),
+                    "imageWidth": result.get("imageWidth", 0),
+                    "imageHeight": result.get("imageHeight", 0),
+                    "textBoxes": result.get("textBoxes", []),
+                }
+            ]
+            return result
+
+        # Multi-page: run per-page, then merge.
+        per_page_results = []
+        per_page_meta = []  # (imageWidth, imageHeight) per page, for offsetting overlays
+        for i, img_b64 in enumerate(images):
+            raw = img_b64.split(",", 1)[1] if "," in img_b64 else img_b64
+            try:
+                image_bytes = base64.b64decode(raw)
+            except Exception as decode_err:
+                return {"error": f"Page {i+1}: invalid base64 ({decode_err})"}
+            page_result = run_full_ocr_analysis(image_bytes=image_bytes, keywords=keywords, **name_kwargs)
+            page_result["pageIndex"] = i
+            per_page_results.append(page_result)
+            per_page_meta.append({
+                "imageWidth": page_result.get("imageWidth", 0),
+                "imageHeight": page_result.get("imageHeight", 0),
+            })
+
+        merged = _merge_multi_page_results(per_page_results, per_page_meta)
+        merged["pageCount"] = len(per_page_results)
+        merged["pages"] = [
+            {
+                "pageIndex": r.get("pageIndex", i),
+                "extractedTextPreview": r.get("extractedTextPreview", ""),
+                "extractedText": r.get("extractedText", ""),
+                "completenessScore": r.get("completenessScore", 0),
+                "ocrConfidence": r.get("ocrConfidence", 0),
+                "imageWidth": r.get("imageWidth", 0),
+                "imageHeight": r.get("imageHeight", 0),
+                "textBoxes": r.get("textBoxes", []),
+            }
+            for i, r in enumerate(per_page_results)
+        ]
+        return merged
 
     return {"error": "Provide imageBase64 or detectedText"}
+
+
+def _merge_multi_page_results(per_page_results: list[dict], per_page_meta: list[dict]) -> dict:
+    """Merge per-page OCR results into a single response.
+
+    Strategy:
+    - extractedText: page-separated with a small divider.
+    - extractedTextPreview: first 500 chars of the merged text.
+    - foundKeywords / missingKeywords: union across pages.
+    - completenessScore: average (citizens care about overall completeness).
+    - ocrConfidence: weighted average by extracted-text length (longer pages
+      contribute proportionally).
+    - rawOCRConfidence: min across pages (worst-case signal).
+    - keywordCount: kept from first page (the request supplied it).
+    - stampCount: sum; stampRegions re-indexed with y-offset = sum of prior
+      pages' imageHeight so the frontend can render overlays on a stacked
+      image.
+    - textBoxes: concatenated with imageWidth/imageHeight per page so the
+      modal can render each page's overlays at the right scale.
+    """
+    if not per_page_results:
+        return {}
+
+    pages_with_text = [p for p in per_page_results if p.get("extractedText")]
+    text_blocks = []
+    for p in per_page_results:
+        if p.get("extractedText"):
+            text_blocks.append(p["extractedText"])
+    merged_text = "\n\n".join(text_blocks)
+
+    found_set = set()
+    missing_set = set()
+    found_with_meta = []
+    missing_with_meta = []
+    for p in per_page_results:
+        for kw in p.get("foundKeywords", []) or []:
+            if kw not in found_set:
+                found_set.add(kw)
+                found_with_meta.append(kw)
+        for kw in p.get("missingKeywords", []) or []:
+            if kw not in missing_set:
+                missing_set.add(kw)
+                missing_with_meta.append(kw)
+
+    # Average completeness; if any page is incomplete we mark the whole as not
+    # complete (officers need to see worst-case).
+    completeness_scores = [p.get("completenessScore", 0) for p in per_page_results]
+    avg_completeness = sum(completeness_scores) / len(completeness_scores) if completeness_scores else 0.0
+    is_complete = all(p.get("isComplete", False) for p in per_page_results)
+
+    # Weighted OCR confidence by extracted-text length.
+    total_len = sum(len(p.get("extractedText", "") or "") for p in per_page_results)
+    weighted_ocr = 0.0
+    if total_len > 0:
+        weighted_ocr = sum(
+            (len(p.get("extractedText", "") or "") * (p.get("ocrConfidence", 0) or 0))
+            for p in per_page_results
+        ) / total_len
+
+    raw_confs = [p.get("rawOCRConfidence", 0) for p in per_page_results if p.get("rawOCRConfidence") is not None]
+    raw_min = min(raw_confs) if raw_confs else 0.0
+
+    # Stamp regions: re-index with y-offset.
+    y_offset = 0
+    reindexed_regions = []
+    stamp_count = 0
+    for i, p in enumerate(per_page_results):
+        meta = per_page_meta[i] if i < len(per_page_meta) else {}
+        page_h = meta.get("imageHeight", 0) or 0
+        sa = p.get("stampAnalysis") or {}
+        stamp_count += sa.get("stampCount", 0) or 0
+        for r in sa.get("stampRegions", []) or []:
+            bb = r.get("boundingBox") or {}
+            reindexed_regions.append({
+                "area": r.get("area", 0),
+                "circularity": r.get("circularity", 0),
+                "boundingBox": {
+                    "x": bb.get("x", 0),
+                    "y": (bb.get("y", 0) or 0) + y_offset,
+                    "w": bb.get("w", 0),
+                    "h": bb.get("h", 0),
+                },
+                "pageIndex": i,
+            })
+        y_offset += page_h
+
+    merged_stamp = {
+        "stampDetected": any((p.get("stampAnalysis") or {}).get("stampDetected") for p in per_page_results),
+        "stampColor": (per_page_results[0].get("stampAnalysis") or {}).get("stampColor"),
+        "stampConfidence": max(((p.get("stampAnalysis") or {}).get("stampConfidence", 0) or 0) for p in per_page_results),
+        "stampCount": stamp_count,
+        "stampRegions": reindexed_regions,
+    }
+
+    # Take image dimensions from the first page (the merged OCR result is
+    # conceptually rendered against the first page's coordinate space for
+    # the persistent preview, which only stores a single image).
+    first_meta = per_page_meta[0] if per_page_meta else {}
+    first_page = per_page_results[0] if per_page_results else {}
+
+    return {
+        # Carry through top-level scalar fields with sensible aggregation.
+        "documentType": first_page.get("documentType", "Unknown"),
+        "classificationConfidence": first_page.get("classificationConfidence", 0),
+        "classificationSource": first_page.get("classificationSource", "heuristic"),
+        "foundKeywords": found_with_meta,
+        "missingKeywords": missing_with_meta,
+        "highlightedMissingItems": [
+            item for p in per_page_results
+            for item in (p.get("highlightedMissingItems") or [])
+        ],
+        "completenessScore": round(avg_completeness, 2),
+        "isComplete": is_complete,
+        "ocrConfidence": round(weighted_ocr, 2),
+        "rawOCRConfidence": round(raw_min, 2),
+        "detectedLanguage": first_page.get("detectedLanguage", "unknown"),
+        "devanagariRatio": max((p.get("devanagariRatio", 0) or 0) for p in per_page_results),
+        "extractedTextPreview": merged_text[:500],
+        "extractedText": merged_text,
+        "keywordCount": len(found_with_meta) + len(missing_with_meta),
+        "stampAnalysis": merged_stamp,
+        "nameVerification": first_page.get("nameVerification"),
+        "imageQualityIssue": first_page.get("imageQualityIssue"),
+        # Tier-3 #12/#15: bounding boxes are per-page; the modal reads from `pages`.
+        "textBoxes": first_page.get("textBoxes", []) or [],
+        "imageWidth": first_meta.get("imageWidth", 0),
+        "imageHeight": first_meta.get("imageHeight", 0),
+    }
 
 
 @app.post("/analyze-document-upload")

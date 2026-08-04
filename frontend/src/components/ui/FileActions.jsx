@@ -304,6 +304,48 @@ export function FileActions({
         </div>
       )}
 
+      {/* Missing Required Documents Alert Banner & Edit Modal Trigger */}
+      {hasMissingDocs && !isClosed && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <Icons.AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <strong className="text-sm font-bold text-amber-950 dark:text-amber-100">
+                  Routing Blocked — Remaining Required Document(s) Needed ({missingDocs.length})
+                </strong>
+                <p className="text-xs text-amber-900/80 dark:text-amber-300/80 mt-0.5">
+                  Forwarding and backtracking are locked until missing required checklist item(s) are submitted and verified by the officer.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                if (!isScanVerified) {
+                  setManualReasonError('Physical QR scan required! Please scan the envelope QR tag first to verify custody before editing/resolving documents.');
+                  onScanClick();
+                  return;
+                }
+                setIsResolveModalOpen(true);
+              }}
+              className="shrink-0 shadow-sm"
+            >
+              <Icons.FileText className="h-3.5 w-3.5" /> Edit / Resolve Missing Documents
+            </Button>
+          </div>
+          <ul className="flex flex-wrap gap-1.5 pt-1">
+            {missingDocs.map((doc) => (
+              <li key={doc} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-950 dark:text-amber-100">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
+                {doc}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* If file is in transit, block all forward/backtrack actions until physical receipt is confirmed */}
       {isInTransit ? (
         <div className="space-y-4 p-5 rounded-2xl border border-primary/30 bg-primary/[0.03]">

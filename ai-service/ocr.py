@@ -17,6 +17,8 @@ from typing import Any
 import numpy as np
 
 from preprocessing import inspect_image_quality, preprocess_image_pipeline
+from stamp_detection import detect_government_stamp
+from name_verification import verify_citizen_name
 
 _ocr_reader = None
 _doc_classifier_model = None
@@ -224,8 +226,12 @@ def run_full_ocr_analysis(
     image_bytes: bytes | None = None,
     keywords: list[str] | None = None,
     detected_text: str | None = None,
+    citizen_name: str | None = None,
+    citizen_name_nepali: str | None = None,
 ) -> dict[str, Any]:
     keywords = keywords or DEFAULT_KEYWORDS
+    stamp_analysis = None
+    cv_img = None
 
     if detected_text:
         text = detected_text
@@ -244,8 +250,11 @@ def run_full_ocr_analysis(
         reader = get_ocr_reader()
         raw_results = reader.readtext(cv_img, detail=1, paragraph=False)
 
-        # Extract text boxes and text-length weighted confidence
+        # Extract text boxes and text-length weighted confidence.
+        # Tier-3 #12: also keep each word's 4-point bounding polygon so the
+        # frontend can render overlays and highlight in-place text matches.
         detected_parts = []
+        text_boxes = []
         total_len = 0
         weighted_conf_sum = 0.0
 
@@ -256,6 +265,12 @@ def run_full_ocr_analysis(
                 length = len(txt_str)
                 total_len += length
                 weighted_conf_sum += length * float(prob)
+                # bbox is a 4-point polygon: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+                text_boxes.append({
+                    "text": txt_str,
+                    "bbox": [[float(p[0]), float(p[1])] for p in bbox],
+                    "confidence": round(float(prob), 3),
+                })
 
         text = " ".join(detected_parts)
         easyocr_confidence = (
@@ -264,12 +279,90 @@ def run_full_ocr_analysis(
 
         # Re-evaluate quality inspection with text box count
         quality_info = inspect_image_quality(cv_img, word_box_count=len(detected_parts))
+
+        # Tier-3 #12: preprocessed-image dimensions so the frontend can
+        # normalize bounding-box coordinates without re-loading the image.
+        image_height, image_width = cv_img.shape[:2]
     else:
         return {"error": "Provide imageBase64 or detectedText"}
+
+    # ── Stamp / Seal Detection ──────────────────────────────────────────
+    # Run on the same preprocessed image used for OCR (no extra I/O).
+    if cv_img is not None:
+        try:
+            stamp_analysis = detect_government_stamp(cv_img)
+        except Exception:
+            stamp_analysis = {
+                "stampDetected": False,
+                "stampColor": None,
+                "stampConfidence": 0.0,
+                "stampCount": 0,
+                "stampRegions": [],
+            }
 
     keyword_result = check_keywords_with_confidence(text, keywords, easyocr_confidence)
     classification = classify_document_ml_or_heuristic(text)
     script_info = detect_script(text)
+
+    # ── Stamp-aware score adjustments ───────────────────────────────────
+    if stamp_analysis and stamp_analysis.get("stampDetected"):
+        stamp_conf = stamp_analysis["stampConfidence"]
+
+        # If "Stamp" (or similar) is in the required keywords and was NOT found
+        # by OCR text matching, promote it to found since we visually detected it.
+        stamp_keywords = {"stamp", "छाप", "टिकट", "seal", "official stamp"}
+        missing_kws = keyword_result.get("missingKeywords", [])
+        found_kws = keyword_result.get("foundKeywords", [])
+        promoted = []
+        still_missing = []
+        for kw in missing_kws:
+            if kw.lower() in stamp_keywords:
+                promoted.append(kw)
+            else:
+                still_missing.append(kw)
+
+        if promoted:
+            keyword_result["foundKeywords"] = found_kws + promoted
+            keyword_result["missingKeywords"] = still_missing
+            keyword_result["highlightedMissingItems"] = [
+                item for item in keyword_result["highlightedMissingItems"]
+                if item["keyword"] not in promoted
+            ]
+            # Recalculate completeness
+            total = len(keyword_result["foundKeywords"]) + len(still_missing)
+            keyword_result["completenessScore"] = round(
+                len(keyword_result["foundKeywords"]) / total if total else 1.0, 2
+            )
+            keyword_result["isComplete"] = len(still_missing) == 0
+
+        # Boost completeness score by stamp signal (+0.10, capped at 1.0)
+        keyword_result["completenessScore"] = min(
+            1.0,
+            round(keyword_result["completenessScore"] + 0.10 * stamp_conf, 2),
+        )
+
+        # Blend stamp confidence into calibrated OCR confidence (10% weight)
+        ocr_conf = keyword_result.get("ocrConfidence", 0.5)
+        keyword_result["ocrConfidence"] = min(
+            0.98,
+            round(0.90 * ocr_conf + 0.10 * stamp_conf, 2),
+        )
+
+    # ── Name Verification ───────────────────────────────────────────────
+    name_result = None
+    if citizen_name or citizen_name_nepali:
+        try:
+            name_result = verify_citizen_name(text, citizen_name, citizen_name_nepali)
+        except Exception as exc:
+            import traceback
+            print(f"[NAME_VERIFY] Error: {exc}")
+            traceback.print_exc()
+            name_result = {
+                "nameFound": False,
+                "matchedName": None,
+                "matchConfidence": 0.0,
+                "matchType": "not_found",
+            }
 
     return {
         **keyword_result,
@@ -280,4 +373,12 @@ def run_full_ocr_analysis(
         "imageQualityIssue": quality_info,
         "extractedTextPreview": text[:500] if text else "",
         "keywordCount": len(keywords),
+        "stampAnalysis": stamp_analysis,
+        "nameVerification": name_result,
+        # Tier-3 #12: per-word bounding polygons + image dimensions for the
+        # side-by-side review modal. Empty when OCR ran on `detectedText`
+        # (no source image to localize against).
+        "textBoxes": text_boxes if 'text_boxes' in locals() and text_boxes else [],
+        "imageWidth": int(image_width) if 'image_width' in locals() else 0,
+        "imageHeight": int(image_height) if 'image_height' in locals() else 0,
     }

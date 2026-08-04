@@ -97,6 +97,8 @@ export async function trackFile(req, res, next) {
       emailNotificationsActive: Boolean(file.citizenEmail),
       timeline: citizenTimeline,
       documentVerification: file.documentVerification || null,
+      documentVerifications: file.documentVerifications || [],
+      verificationStatus: file.verificationStatus || 'unverified',
       requiredDocuments: file.requiredDocuments || [],
     });
   } catch (err) {

@@ -11,7 +11,7 @@ const DOCUMENT_TYPES = [
 ];
 
 const DOCUMENT_TEMPLATES = [
-  'Citizenship Copy', 'Land Ownership Title Deed', 'Recent Passport Photograph',
+  'Citizenship Certificate', 'Land Ownership Title Deed', 'Recent Passport Photograph',
   'Previous Tax Invoice Receipt', 'Ward Chair Signature Clearance',
 ];
 
@@ -107,6 +107,14 @@ export default function RegisterFilePage() {
       setError('Phone number must be exactly 10 digits.');
       return;
     }
+    if (!scanPreview) {
+      setError('Document upload is mandatory. Please upload a photo or scan of the physical document.');
+      return;
+    }
+    if (scanning) {
+      setError('Document scan is still in progress. Please wait for OCR analysis to finish.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -118,9 +126,19 @@ export default function RegisterFilePage() {
         documentType,
         requiredDocuments: requiredDocs,
         internalNotes: internalNotes.trim(),
+        documentVerification: scanResult ? {
+          detectedType: scanResult.documentType,
+          ocrConfidence: scanResult.ocrConfidence,
+          qualityScore: scanResult.imageQualityIssue?.qualityScore || 0.85,
+          completenessScore: scanResult.completenessScore,
+          detectedLanguage: scanResult.detectedLanguage,
+          isQualityPassed: scanResult.imageQualityIssue?.isQualityPassed ?? true,
+          missingKeywords: scanResult.missingKeywords || [],
+          missingDocuments: scanResult.missingKeywords || [],
+        } : undefined,
       });
       setReceipt(res);
-      toast.success('File registered successfully.');
+      toast.success('File registered successfully with document verification.');
     } catch (err) {
       setError(err.message || 'Failed to register file.');
     } finally {
@@ -151,7 +169,7 @@ export default function RegisterFilePage() {
             <PageHeading
               breadcrumbs={['Workspace', 'Register file']}
               title="Register a physical file"
-              description="Enter citizen details and required documents to generate a trackable QR record."
+              description="Enter citizen details and upload required physical document scan to generate a trackable QR record."
             />
 
             {error && <Alert tone="error">{error}</Alert>}
@@ -205,10 +223,12 @@ export default function RegisterFilePage() {
                 </div>
 
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold text-foreground">AI document scan (optional)</label>
+                  <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                    Mandatory AI Document Verification Scan <span className="text-red-500">*</span>
+                  </label>
                   <p className="mb-3 text-xs text-muted-foreground">
-                    Upload a photo or scan of the citizen's document — Nepali (नेपाली) and English are both supported.
-                    The AI checks it against the required-documents checklist above and suggests a document type.
+                    Upload a photo or scan of the physical document — Nepali (नेपाली) and English are both supported.
+                    The AI checks image clarity, validates checklist items, and verifies document type.
                   </p>
 
                   {!scanPreview ? (
@@ -287,10 +307,12 @@ export default function RegisterFilePage() {
         ) : (
           <div className="animate-zoom-in">
             <div className="no-print mb-6 text-center">
-              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600">
-                <Icons.CheckCircle className="h-6 w-6" />
+              <div className={`mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl ${scanResult?.missingKeywords?.length ? 'bg-amber-500/10 text-amber-600' : 'bg-emerald-500/10 text-emerald-600'}`}>
+                {scanResult?.missingKeywords?.length ? <Icons.AlertCircle className="h-6 w-6" /> : <Icons.CheckCircle className="h-6 w-6" />}
               </div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground">File registered</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                {scanResult?.missingKeywords?.length ? 'File registered (Action Required)' : 'File registered'}
+              </h1>
               <p className="mt-1.5 text-sm text-muted-foreground">Print the tag below and attach it to the physical folder.</p>
             </div>
 
@@ -304,6 +326,20 @@ export default function RegisterFilePage() {
                 )}
               </div>
               <h3 className="text-center text-lg font-bold leading-snug text-foreground">{file?.title}</h3>
+
+              {scanResult?.missingKeywords?.length > 0 && (
+                <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-left">
+                  <p className="text-xs font-bold text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
+                    <Icons.AlertCircle className="h-4 w-4 shrink-0 text-amber-600" /> Action Required: Missing Required Document(s)
+                  </p>
+                  <ul className="mt-1.5 list-disc list-inside text-xs text-amber-900/90 dark:text-amber-300/90 font-medium">
+                    {scanResult.missingKeywords.map((kw) => (
+                      <li key={kw}><strong>{kw}</strong></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="mt-6 grid grid-cols-2 gap-4 rounded-xl border border-border bg-muted/40 p-4 text-left text-xs">
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">File UID</span><span className="mt-0.5 font-mono font-bold text-foreground">{file?.fileUid}</span></div>
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">Tracking ID</span><span className="mt-0.5 font-mono font-bold text-foreground">{file?.trackingId}</span></div>
@@ -312,8 +348,10 @@ export default function RegisterFilePage() {
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">Email Alert</span><span className="mt-0.5 font-bold text-foreground">{citizenEmail ? <span className="text-emerald-600 font-mono">✓ {citizenEmail}</span> : <span className="text-muted-foreground italic">Not provided</span>}</span></div>
                 <div><span className="block text-xs font-bold uppercase text-muted-foreground">Initial desk</span><span className="mt-0.5 font-bold text-foreground">{file?.currentLocation}</span></div>
               </div>
-              <p className="mt-4 rounded-lg bg-emerald-500/10 p-2 text-center text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                📲 {citizenEmail ? `Email & SMS alerts dispatched to ${citizenEmail}. The citizen will receive automated notifications on status changes.` : `SMS notification logged for +977-${citizenPhone}. Citizen will receive updates.`}
+              <p className={`mt-4 rounded-lg p-2.5 text-center text-xs font-medium ${scanResult?.missingKeywords?.length ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'}`}>
+                📲 {scanResult?.missingKeywords?.length
+                  ? `Email alert with missing document instructions dispatched to ${citizenEmail || citizenPhone}.`
+                  : citizenEmail ? `Email & SMS alerts dispatched to ${citizenEmail}. The citizen will receive automated notifications.` : `SMS notification logged for +977-${citizenPhone}.`}
               </p>
               <p className="mt-4 text-center text-xs italic leading-relaxed text-muted-foreground">
                 Track status anytime by scanning this QR or visiting<br /><strong>{window.location.origin}/track</strong>

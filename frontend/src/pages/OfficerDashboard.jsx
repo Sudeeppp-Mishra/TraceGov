@@ -422,6 +422,7 @@ export default function OfficerDashboard() {
                 {/* File Action Workflow Component */}
                 <FileActions
                   selectedFile={selectedFile}
+                  currentUser={currentUser}
                   departmentsList={departmentsList}
                   actionTab={actionTab}
                   setActionTab={(id) => {
@@ -435,6 +436,7 @@ export default function OfficerDashboard() {
                   onForwardSubmit={handleForwardFile}
                   onBacktrackSubmit={handleBacktrackFile}
                   onReceiveSubmit={handleReceiveFile}
+                  onResolveSuccess={() => handleSelectFile(selectedFile.fileUid)}
                 />
 
                 <Card>
@@ -442,7 +444,7 @@ export default function OfficerDashboard() {
                   {selectedFileHistory.length > 0 ? (
                     <Timeline>
                       {selectedFileHistory.map((item, idx) => (
-                        <TimelineItem key={idx} title={item.actionType}
+                        <TimelineItem key={idx} title={item.actionType === 'Verified' ? 'Document Verified' : item.actionType}
                           meta={new Date(item.timestamp).toLocaleString()}
                           tone={item.actionType === 'Backtracked' ? 'red' : 'primary'}>
                           <div className="flex items-center gap-2">

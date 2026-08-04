@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Button, Card, Icons, Input, Select, Tabs, Textarea } from './index';
+import { useState } from 'react';
+import { api } from '../../lib/api';
+import { Button, Card, Icons, Input, Modal, Select, Tabs, Textarea } from '.';
 
 /**
  * Enforces QR-Scan verification as primary action flow for officer file operations.
@@ -7,6 +8,7 @@ import { Button, Card, Icons, Input, Select, Tabs, Textarea } from './index';
  */
 export function FileActions({
   selectedFile,
+  currentUser,
   departmentsList = [],
   actionTab,
   setActionTab,
@@ -17,6 +19,7 @@ export function FileActions({
   onForwardSubmit,
   onBacktrackSubmit,
   onReceiveSubmit,
+  onResolveSuccess,
 }) {
   // Routing form state
   const [nextLocation, setNextLocation] = useState('');
@@ -32,9 +35,27 @@ export function FileActions({
   const [manualReason, setManualReason] = useState('');
   const [manualReasonError, setManualReasonError] = useState('');
 
+  // Resolve missing documents modal state
+  const [isResolveModalOpen, setIsResolveModalOpen] = useState(false);
+  const [resolveLoading, setResolveLoading] = useState(false);
+  const [resolveNotes, setResolveNotes] = useState('');
+  const [docScanPreview, setDocScanPreview] = useState(null);
+  const [docScanning, setDocScanning] = useState(false);
+  const [docScanResult, setDocScanResult] = useState(null);
+  const [docScanError, setDocScanError] = useState('');
+
   const isScanVerified = scannedVia === 'webcam' || scannedVia === 'mobile';
   const isClosed = ['Dispatched', 'Approved', 'Rejected'].includes(selectedFile?.currentStatus);
   const isInTransit = selectedFile?.currentStatus === 'In Transit';
+
+  const isTargetDeskForCurrentOfficer = Boolean(
+    currentUser?.deskLocation &&
+    selectedFile?.targetLocation &&
+    currentUser.deskLocation.toLowerCase().trim() === selectedFile.targetLocation.toLowerCase().trim()
+  );
+
+  const missingDocs = selectedFile?.documentVerification?.missingKeywords || selectedFile?.documentVerification?.missingDocuments || [];
+  const hasMissingDocs = missingDocs.length > 0;
 
   const handleReceive = (e) => {
     if (e) e.preventDefault();
@@ -57,8 +78,16 @@ export function FileActions({
     e.preventDefault();
     setManualReasonError('');
 
-    if (!isScanVerified && !manualReason.trim()) {
-      setManualReasonError('Mandatory reason required for manual update (e.g. QR damaged, Camera unavailable).');
+    if (!isScanVerified) {
+      if (!manualReason.trim()) {
+        setManualReasonError('Physical file QR verification required! Please scan the envelope QR tag to confirm file custody before forwarding.');
+        onScanClick();
+        return;
+      }
+    }
+
+    if (hasMissingDocs) {
+      setManualReasonError(`Cannot forward file until missing required document(s) are submitted: ${missingDocs.join(', ')}. Please click 'Edit / Resolve Missing Documents'.`);
       return;
     }
 
@@ -75,8 +104,16 @@ export function FileActions({
     e.preventDefault();
     setManualReasonError('');
 
-    if (!isScanVerified && !manualReason.trim()) {
-      setManualReasonError('Mandatory reason required for manual update (e.g. QR damaged, Bulk processing).');
+    if (!isScanVerified) {
+      if (!manualReason.trim()) {
+        setManualReasonError('Physical file QR verification required! Please scan the envelope QR tag to confirm file custody before backtracking.');
+        onScanClick();
+        return;
+      }
+    }
+
+    if (hasMissingDocs) {
+      setManualReasonError(`Cannot backtrack file until missing required document(s) are submitted: ${missingDocs.join(', ')}. Please click 'Edit / Resolve Missing Documents'.`);
       return;
     }
 
@@ -87,6 +124,60 @@ export function FileActions({
       scannedVia: isScanVerified ? scannedVia : 'manual',
       remarks: isScanVerified ? undefined : manualReason.trim(),
     });
+  };
+
+  const handleDocFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setDocScanError('');
+    setDocScanResult(null);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result;
+      setDocScanPreview(base64);
+      setDocScanning(true);
+      try {
+        const result = await api.analyzeDocument({
+          imageBase64: base64,
+          requiredDocuments: missingDocs,
+        });
+        setDocScanResult(result);
+      } catch {
+        setDocScanError('AI OCR service offline. You can still verify missing documents manually.');
+      } finally {
+        setDocScanning(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleConfirmResolve = async () => {
+    const fileId = selectedFile?.id || selectedFile?._id;
+    if (!fileId) return;
+    setResolveLoading(true);
+    try {
+      await api.resolveMissingDocuments(fileId, {
+        documentVerification: docScanResult ? {
+          detectedType: docScanResult.documentType,
+          ocrConfidence: docScanResult.ocrConfidence,
+          qualityScore: docScanResult.imageQualityIssue?.qualityScore || 0.9,
+          completenessScore: 1.0,
+          detectedLanguage: docScanResult.detectedLanguage,
+        } : undefined,
+        resolvedKeywords: missingDocs,
+        notes: resolveNotes.trim() || 'Officer verified remaining required documents.',
+      });
+      setIsResolveModalOpen(false);
+      setDocScanPreview(null);
+      setDocScanResult(null);
+      setResolveNotes('');
+      if (onResolveSuccess) onResolveSuccess();
+    } catch (err) {
+      setManualReasonError(err.message || 'Failed to resolve missing documents.');
+    } finally {
+      setResolveLoading(false);
+    }
   };
 
   if (!selectedFile) {
@@ -147,6 +238,48 @@ export function FileActions({
         </Button>
       </div>
 
+      {/* Missing Required Documents Alert Banner & Edit Modal Trigger */}
+      {hasMissingDocs && !isClosed && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <Icons.AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <strong className="text-sm font-bold text-amber-950 dark:text-amber-100">
+                  Routing Blocked — Remaining Required Document(s) Needed ({missingDocs.length})
+                </strong>
+                <p className="text-xs text-amber-900/80 dark:text-amber-300/80 mt-0.5">
+                  Forwarding and backtracking are locked until missing required checklist item(s) are submitted and verified by the officer.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                if (!isScanVerified) {
+                  setManualReasonError('Physical QR scan required! Please scan the envelope QR tag first to verify custody before editing/resolving documents.');
+                  onScanClick();
+                  return;
+                }
+                setIsResolveModalOpen(true);
+              }}
+              className="shrink-0 shadow-sm"
+            >
+              <Icons.FileText className="h-3.5 w-3.5" /> Edit / Resolve Missing Documents
+            </Button>
+          </div>
+          <ul className="flex flex-wrap gap-1.5 pt-1">
+            {missingDocs.map((doc) => (
+              <li key={doc} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-950 dark:text-amber-100">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
+                {doc}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <Tabs tabs={tabs} active={actionTab} onChange={setActionTab} />
 
       {/* Manual Action Bypass Reason Box */}
@@ -174,40 +307,56 @@ export function FileActions({
 
       {/* In Transit Receive Card */}
       {isInTransit && (
-        <div className="space-y-4 p-4 rounded-xl border border-primary/20 bg-primary/5">
-          <div className="flex items-start gap-3">
-            <Icons.Clock className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-            <div>
-              <h4 className="text-sm font-bold text-foreground">File in transit to {selectedFile.targetLocation || 'your desk'}</h4>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Sent from <strong>{selectedFile.currentLocation}</strong>. Confirm physical receipt via QR scan (or manual ID confirm) to receive into your active desk queue.
-              </p>
+        isTargetDeskForCurrentOfficer ? (
+          <div className="space-y-4 p-4 rounded-xl border border-primary/20 bg-primary/5">
+            <div className="flex items-start gap-3">
+              <Icons.Clock className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+              <div>
+                <h4 className="text-sm font-bold text-foreground">File in transit to your desk ({selectedFile.targetLocation})</h4>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Sent from <strong>{selectedFile.currentLocation}</strong>. Confirm physical receipt via QR scan (or manual ID confirm) to receive into your active desk queue.
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
-            <Button
-              variant="primary"
-              size="md"
-              onClick={onScanClick}
-              className="w-full sm:w-auto shadow-sm"
-              loading={actionLoading}
-            >
-              <Icons.Scan className="h-4 w-4" /> Scan QR to Confirm Receipt
-            </Button>
-            {!isScanVerified && (
+            <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
               <Button
-                variant="outline"
+                variant="primary"
                 size="md"
-                onClick={handleReceive}
-                className="w-full sm:w-auto"
+                onClick={onScanClick}
+                className="w-full sm:w-auto shadow-sm"
                 loading={actionLoading}
               >
-                Confirm Receipt Manually
+                <Icons.Scan className="h-4 w-4" /> Scan QR to Confirm Receipt
               </Button>
-            )}
+              {!isScanVerified && (
+                <Button
+                  variant="outline"
+                  size="md"
+                  onClick={handleReceive}
+                  className="w-full sm:w-auto"
+                  loading={actionLoading}
+                >
+                  Confirm Receipt Manually
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="space-y-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
+            <div className="flex items-start gap-3">
+              <Icons.CheckCircle className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" />
+              <div>
+                <h4 className="text-sm font-bold text-emerald-950 dark:text-emerald-100">
+                  File forwarded & currently in transit
+                </h4>
+                <p className="text-xs text-emerald-900/80 dark:text-emerald-300/80 mt-0.5">
+                  This file has been forwarded to <strong>{selectedFile.targetLocation || 'destination desk'}</strong>. Your desk work is complete. Awaiting physical receipt confirmation by receiving officer at {selectedFile.targetLocation}.
+                </p>
+              </div>
+            </div>
+          </div>
+        )
       )}
 
       {actionTab === 'forward' && !isClosed && !isInTransit && (
@@ -260,6 +409,72 @@ export function FileActions({
           </div>
         </form>
       )}
+
+      {/* Edit / Resolve Missing Documents Modal */}
+      <Modal
+        isOpen={isResolveModalOpen}
+        onClose={() => setIsResolveModalOpen(false)}
+        title="Edit / Resolve Missing Documents"
+        description="Verify remaining physical attachments or upload scans to complete the document checklist."
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-950 dark:text-amber-100">
+            <p className="font-bold flex items-center gap-1.5">
+              <Icons.AlertCircle className="h-4 w-4 text-amber-600 shrink-0" /> Remaining Required Document(s):
+            </p>
+            <ul className="mt-1 list-disc list-inside space-y-0.5 font-semibold">
+              {missingDocs.map((doc) => (
+                <li key={doc}>{doc}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-foreground">
+              Attach missing document scan (Optional AI Verification)
+            </label>
+            {!docScanPreview ? (
+              <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 p-5 text-center transition-colors hover:border-border-strong">
+                <Icons.Sparkles className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">Choose missing document scan</span>
+                <span className="text-xs text-muted-foreground">JPG or PNG · AI will scan extracted keywords</span>
+                <input type="file" accept="image/*" className="hidden" onChange={handleDocFileChange} disabled={docScanning} />
+              </label>
+            ) : (
+              <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 p-3">
+                <img src={docScanPreview} alt="Missing doc scan" className="h-16 w-16 rounded-lg border bg-white object-cover" />
+                <div className="min-w-0 flex-1 text-xs">
+                  {docScanning ? (
+                    <p className="text-muted-foreground">Scanning document with AI OCR…</p>
+                  ) : docScanResult ? (
+                    <p className="font-semibold text-emerald-600">✓ AI OCR scan complete ({docScanResult.documentType})</p>
+                  ) : (
+                    <p className="text-muted-foreground">{docScanError || 'Scan ready'}</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <Textarea
+            label="Officer verification notes"
+            id="resolve_notes"
+            rows={2}
+            placeholder="e.g. Received original physical copy at Reception desk."
+            value={resolveNotes}
+            onChange={(e) => setResolveNotes(e.target.value)}
+          />
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => setIsResolveModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" loading={resolveLoading} onClick={handleConfirmResolve}>
+              <Icons.CheckCircle className="h-4 w-4" /> Mark missing documents as verified
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {actionTab === 'backtrack' && !isClosed && !isInTransit && (
         <form onSubmit={handleBacktrack} className="space-y-4">

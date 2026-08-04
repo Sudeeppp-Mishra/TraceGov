@@ -70,18 +70,40 @@ export function QrScanner({ isOpen, onClose, onScanSuccess }) {
     return () => {
       clearTimeout(timer);
       if (qrScannerRef.current) {
-        qrScannerRef.current.stop().catch(() => {});
+        const scanner = qrScannerRef.current;
         qrScannerRef.current = null;
+        try {
+          if (scanner.isScanning) {
+            scanner.stop().catch(() => {});
+          } else if (typeof scanner.clear === 'function') {
+            scanner.clear().catch(() => {});
+          }
+        } catch {
+          // Ignore html5-qrcode error on cleanup
+        }
       }
     };
   }, [isOpen]);
 
   const handleClose = () => {
-    if (qrScannerRef.current) {
-      qrScannerRef.current.stop().catch(() => {});
-      qrScannerRef.current = null;
+    const scanner = qrScannerRef.current;
+    qrScannerRef.current = null;
+
+    if (scanner) {
+      try {
+        if (scanner.isScanning) {
+          scanner.stop().catch(() => {});
+        } else if (typeof scanner.clear === 'function') {
+          scanner.clear().catch(() => {});
+        }
+      } catch {
+        // Ignore html5-qrcode error when stopping non-scanning instance
+      }
     }
-    onClose();
+
+    if (typeof onClose === 'function') {
+      onClose();
+    }
   };
 
   return (

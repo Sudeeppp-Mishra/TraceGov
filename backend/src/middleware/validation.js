@@ -169,6 +169,10 @@ export function validateRegisterFile(req, res, next) {
     errors.push({ field: 'requiredDocuments', message: 'Required documents checklist must be an array' });
   }
 
+  if (req.body.documentVerifications && !Array.isArray(req.body.documentVerifications)) {
+    errors.push({ field: 'documentVerifications', message: 'Document verifications must be an array' });
+  }
+
   if (errors.length > 0) {
     return res.status(400).json({
       success: false,

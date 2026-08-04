@@ -104,6 +104,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  resolveMissingDocuments: (id, payload = {}) =>
+    request(`/files/${id}/resolve-documents`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
   getOfficerInbox: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/files/inbox${qs ? `?${qs}` : ''}`);

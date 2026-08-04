@@ -1,39 +1,73 @@
 import mongoose from 'mongoose';
 
+import { generateQrCode } from './qrService.js';
+
 /**
  * Format HTML & Plaintext Email Templates for TraceGov File Status Updates.
  */
-export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, status, location, notes }) {
+export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, status, location, notes, missingDocuments = [], qrDataUrl }) {
   const origin = process.env.APP_URL || (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',')[0].trim() : 'http://localhost:5173');
   const trackingUrl = `${origin.replace(/\/$/, '')}/track/${trackingId}`;
 
-  // Status palette matches the app's own design tokens - amber for routine
-  // friction (Backtracked), not red. Red is reserved for a genuine negative
-  // outcome (Rejected) only.
+  const hasMissing = Array.isArray(missingDocuments) && missingDocuments.length > 0;
+
+  // Status palette matches design tokens - amber for routine friction/corrections
   const STATUS_STYLES = {
     Received: {
+      accent: hasMissing ? '#B8790A' : '#0F9D74',
+      bg: hasMissing ? '#FBF1E1' : '#E7F5F0',
+      headerTitle: hasMissing ? 'Action required: Remaining document(s) needed' : 'File registered',
+      banner: (loc) => hasMissing
+        ? `Your file has been registered at <strong>${loc}</strong>. However, the AI document scan detected missing required document(s).`
+        : `Your file has been registered at <strong>${loc}</strong>. We'll notify you as it moves.`,
+    },
+    'In Transit': {
+      accent: '#2F6FED',
+      bg: '#EAF1FE',
+      headerTitle: 'File in transit',
+      banner: (loc) => `Your file has been dispatched and is currently in transit to <strong>${loc}</strong>.`,
+    },
+    Pending: {
+      accent: '#2F6FED',
+      bg: '#EAF1FE',
+      headerTitle: 'File under routing',
+      banner: (loc) => `Your file is pending desk processing at <strong>${loc}</strong>.`,
+    },
+    'Under Review': {
+      accent: '#2F6FED',
+      bg: '#EAF1FE',
+      headerTitle: 'File under department review',
+      banner: (loc) => `Your file is currently under review at <strong>${loc}</strong>.`,
+    },
+    Verified: {
       accent: '#0F9D74',
       bg: '#E7F5F0',
-      headerTitle: 'File registered',
-      banner: (loc) => `Your file has been registered at <strong>${loc}</strong>. We'll notify you as it moves.`,
+      headerTitle: 'All required document(s) verified',
+      banner: (loc) => `All required physical documents for your file have been verified at <strong>${loc}</strong>. Application processing has resumed.`,
+    },
+    'Document Verified': {
+      accent: '#0F9D74',
+      bg: '#E7F5F0',
+      headerTitle: 'All required document(s) verified',
+      banner: (loc) => `All required physical documents for your file have been verified at <strong>${loc}</strong>. Application processing has resumed.`,
     },
     Approved: {
       accent: '#1F7A5C',
       bg: '#E5F2ED',
       headerTitle: 'File approved',
-      banner: (loc) => `Your file has been approved at <strong>${loc}</strong>.`,
+      banner: (loc) => `Your file has been officially approved by <strong>${loc}</strong>.`,
     },
     Dispatched: {
       accent: '#1F7A5C',
       bg: '#E5F2ED',
-      headerTitle: 'File dispatched',
-      banner: (loc) => `Your file has been completed and dispatched to <strong>${loc}</strong>.`,
+      headerTitle: 'File completed & dispatched',
+      banner: (loc) => `Your file processing has been completed and dispatched to <strong>${loc}</strong>.`,
     },
     Backtracked: {
       accent: '#B8790A',
       bg: '#FBF1E1',
-      headerTitle: 'One thing needs your attention',
-      banner: (loc) => `Your file was sent back for a correction at <strong>${loc}</strong>.`,
+      headerTitle: 'Action required: File returned for correction',
+      banner: (loc) => `Your file was sent back for correction at <strong>${loc}</strong>.`,
     },
     Rejected: {
       accent: '#C1442E',
@@ -44,16 +78,54 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
   };
 
   const style = STATUS_STYLES[status] || {
-    accent: '#2F6FED',
-    bg: '#EAF1FE',
-    headerTitle: `Status update: ${status}`,
+    accent: hasMissing ? '#B8790A' : '#2F6FED',
+    bg: hasMissing ? '#FBF1E1' : '#EAF1FE',
+    headerTitle: hasMissing ? 'Action required: Remaining document(s) needed' : `Status update: ${status}`,
     banner: (loc) => `Your file's status has been updated to <strong>${status}</strong> at <strong>${loc}</strong>.`,
   };
 
   const bannerText = style.banner(location) + (notes ? `<br><br><strong>Note:</strong> ${notes}` : '');
-  const preheaderText = `${style.headerTitle} — ${title} is now at ${location}.`;
+  const preheaderText = hasMissing
+    ? `Action required — missing document(s): ${missingDocuments.join(', ')} for ${title}.`
+    : `${style.headerTitle} — ${title} is now at ${location}.`;
 
-  const subject = `TraceGov: ${style.headerTitle} · ${fileUid}`;
+  const subject = hasMissing
+    ? `TraceGov: Action Required — Missing Document(s) for ${fileUid}`
+    : `TraceGov: ${style.headerTitle} · ${fileUid}`;
+
+  const missingListHtml = hasMissing
+    ? `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FBF1E1; border:1px solid #F3C476; border-radius:8px; margin-top:16px; margin-bottom:20px;">
+        <tr>
+          <td style="padding:16px;">
+            <p style="margin:0 0 8px; font-size:14px; font-weight:700; color:#8A5300;">⚠️ Remaining Required Document(s):</p>
+            <ul style="margin:0; padding-left:20px; font-size:13px; color:#5C3800;">
+              ${missingDocuments.map((doc) => `<li style="margin-bottom:4px;"><strong>${doc}</strong></li>`).join('')}
+            </ul>
+            <p style="margin:12px 0 0; font-size:12px; color:#784900;">
+              Please submit the above remaining physical document(s) at your assigned ward office desk so your application processing can proceed promptly without delay.
+            </p>
+          </td>
+        </tr>
+      </table>
+    `
+    : '';
+
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(fileUid || trackingId)}`;
+
+  const qrCodeHtml = `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px; margin-bottom:24px; text-align:center;">
+        <tr>
+          <td align="center" style="padding:20px; background-color:#FAFAF9; border:1px solid #E7E8EA; border-radius:12px;">
+            <p style="margin:0 0 10px; font-size:12px; font-weight:700; color:#5B6168; text-transform:uppercase; letter-spacing:0.6px;">Your File Tracking QR Code Tag</p>
+            <div style="display:inline-block; padding:10px; background-color:#FFFFFF; border:1px solid #E7E8EA; border-radius:10px; box-shadow: 0 2px 4px rgba(0,0,0,0.04);">
+              <img src="${qrImageUrl}" alt="Tracking QR Code Tag" width="180" height="180" style="display:block; margin:0 auto; border:none;" />
+            </div>
+            <p style="margin:10px 0 0; font-size:11px; color:#787F87;">Scan with any phone camera or officer scanner to open live tracking status.</p>
+          </td>
+        </tr>
+      </table>
+    `;
 
   const htmlContent = `
 <!DOCTYPE html>
@@ -87,7 +159,7 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
               <h1 style="font-size:20px; font-weight:600; color:#14171A; margin:12px 0 8px;">${style.headerTitle}</h1>
               <p style="font-size:14px; color:#5B6168; margin:0 0 20px; line-height:1.5;">Namaste ${citizenName}, here's the latest on your file.</p>
 
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAFAF9; border:1px solid #E7E8EA; border-left:3px solid ${style.accent}; border-radius:8px; margin-bottom:24px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAFAF9; border:1px solid #E7E8EA; border-left:3px solid ${style.accent}; border-radius:8px; margin-bottom:16px;">
                 <tr>
                   <td style="padding:16px; font-size:14px; color:#14171A; line-height:1.6;">
                     ${bannerText}
@@ -95,7 +167,9 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
                 </tr>
               </table>
 
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E8EA; border-radius:8px; margin-bottom:28px;">
+              ${missingListHtml}
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E8EA; border-radius:8px; margin-bottom:20px;">
                 <tr>
                   <td style="padding:12px 16px; border-bottom:1px solid #E7E8EA; font-size:13px; color:#9299A1;">File</td>
                   <td style="padding:12px 16px; border-bottom:1px solid #E7E8EA; font-size:13px; color:#14171A; text-align:right;">${title}</td>
@@ -114,11 +188,13 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
                 </tr>
               </table>
 
+              ${qrCodeHtml}
+
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
                 <tr>
                   <td align="center" style="border-radius:8px; background-color:#2F6FED;">
                     <a href="${trackingUrl}" style="display:block; padding:13px 24px; font-size:14px; font-weight:600; color:#FFFFFF; text-decoration:none;">
-                      Track this file
+                      Track this file & view details
                     </a>
                   </td>
                 </tr>
@@ -144,7 +220,7 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
 </html>
   `;
 
-  const textContent = `TraceGov — ${style.headerTitle}\n\n${title} (${fileUid})\nTracking ID: ${trackingId}\nStatus: ${status} at ${location}${notes ? `\nNote: ${notes}` : ''}\n\nTrack this file: ${trackingUrl}`;
+  const textContent = `TraceGov — ${style.headerTitle}\n\n${title} (${fileUid})\nTracking ID: ${trackingId}\nStatus: ${status} at ${location}${hasMissing ? `\n\n⚠️ Remaining Required Document(s):\n- ${missingDocuments.join('\n- ')}\n\nPlease submit the above remaining physical document(s) at your assigned ward office desk.` : ''}${notes ? `\nNote: ${notes}` : ''}\n\nTrack this file: ${trackingUrl}`;
 
   return { subject, htmlContent, textContent };
 }
@@ -193,7 +269,24 @@ function buildProviderChain() {
  * Send email via Brevo HTTP API (POST https://api.brevo.com/v3/smtp/email).
  * Uses HTTPS port 443 — never blocked by cloud hosts like Render.
  */
-async function attemptBrevoHttpSend(provider, { recipient, subject, htmlContent }) {
+async function attemptBrevoHttpSend(provider, { recipient, subject, htmlContent, qrBase64 }) {
+  const payload = {
+    sender: { name: provider.senderName, email: provider.senderEmail },
+    to: [{ email: recipient }],
+    subject,
+    htmlContent,
+  };
+
+  if (qrBase64) {
+    const rawBase64 = qrBase64.replace(/^data:image\/\w+;base64,/, '');
+    payload.attachment = [
+      {
+        name: 'tracking-qr.png',
+        content: rawBase64,
+      },
+    ];
+  }
+
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
@@ -201,12 +294,7 @@ async function attemptBrevoHttpSend(provider, { recipient, subject, htmlContent 
       'api-key': provider.apiKey,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      sender: { name: provider.senderName, email: provider.senderEmail },
-      to: [{ email: recipient }],
-      subject,
-      htmlContent,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -221,7 +309,7 @@ async function attemptBrevoHttpSend(provider, { recipient, subject, htmlContent 
 /**
  * Send email via SMTP (nodemailer). Works on localhost and SMTP-friendly hosts.
  */
-async function attemptSmtpSend(provider, { recipient, subject, textContent, htmlContent, replyTo }) {
+async function attemptSmtpSend(provider, { recipient, subject, textContent, htmlContent, replyTo, qrBase64 }) {
   const nodemailer = await import('nodemailer');
 
   const transporter = nodemailer.createTransport({
@@ -239,7 +327,7 @@ async function attemptSmtpSend(provider, { recipient, subject, textContent, html
     },
   });
 
-  const info = await transporter.sendMail({
+  const mailOptions = {
     from: provider.from,
     to: recipient,
     replyTo: replyTo || provider.auth.user,
@@ -249,7 +337,21 @@ async function attemptSmtpSend(provider, { recipient, subject, textContent, html
     headers: {
       'X-Application': 'TraceGov Municipal Portal',
     },
-  });
+  };
+
+  if (qrBase64) {
+    const rawBase64 = qrBase64.replace(/^data:image\/\w+;base64,/, '');
+    mailOptions.attachments = [
+      {
+        filename: 'tracking-qr.png',
+        content: Buffer.from(rawBase64, 'base64'),
+        cid: 'qr-code-image',
+        disposition: 'inline',
+      },
+    ];
+  }
+
+  const info = await transporter.sendMail(mailOptions);
 
   return { success: true, messageId: info.messageId };
 }
@@ -264,7 +366,7 @@ async function attemptSmtpSend(provider, { recipient, subject, textContent, html
  * The provider chain is built dynamically from available .env variables,
  * so no code changes are needed when switching environments.
  */
-export async function sendEmailNotification({ file, status, location, notes }) {
+export async function sendEmailNotification({ file, status, location, notes, missingDocuments }) {
   const enabled = process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'false';
   if (!enabled) {
     return { success: false, reason: 'disabled' };
@@ -272,6 +374,18 @@ export async function sendEmailNotification({ file, status, location, notes }) {
 
   if (!file || !file.citizenEmail) {
     return { success: false, reason: 'missing_email' };
+  }
+
+  const missingList = missingDocuments || file.missingDocuments || file.missingKeywords || [];
+
+  let qrDataUrl = file.qrDataUrl;
+  if (!qrDataUrl && file.fileUid) {
+    try {
+      const qrRes = await generateQrCode(file.fileUid, file.wardCode || 'W01');
+      qrDataUrl = qrRes.dataUrl;
+    } catch {
+      // Ignore QR generation fallback error
+    }
   }
 
   const { subject, htmlContent, textContent } = formatEmailTemplate({
@@ -282,6 +396,8 @@ export async function sendEmailNotification({ file, status, location, notes }) {
     status: status || file.currentStatus,
     location: location || file.currentLocation,
     notes,
+    missingDocuments: missingList,
+    qrDataUrl,
   });
 
   const recipient = file.citizenEmail;
@@ -298,7 +414,7 @@ export async function sendEmailNotification({ file, status, location, notes }) {
 
       let result;
       if (provider.type === 'http') {
-        result = await attemptBrevoHttpSend(provider, { recipient, subject, htmlContent });
+        result = await attemptBrevoHttpSend(provider, { recipient, subject, htmlContent, qrBase64: qrDataUrl });
       } else {
         result = await attemptSmtpSend(provider, {
           recipient,
@@ -306,6 +422,7 @@ export async function sendEmailNotification({ file, status, location, notes }) {
           textContent,
           htmlContent,
           replyTo: process.env.SMTP_USER,
+          qrBase64: qrDataUrl,
         });
       }
 

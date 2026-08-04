@@ -10,6 +10,7 @@ import {
   getOfficerInbox,
   getActivityLog,
   getFileSmsLogs,
+  resolveMissingDocuments,
 } from '../controllers/fileController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { validateRegisterFile, validateForward, validateBacktrack } from '../middleware/validation.js';
@@ -35,6 +36,7 @@ router.get('/scan/:identifier', scanFile);
 router.post('/:id/forward', validateForward, forwardFile);
 router.post('/:id/backtrack', validateBacktrack, backtrackFile);
 router.post('/:id/receive', receiveFile);
+router.put('/:id/resolve-documents', resolveMissingDocuments);
 
 // SMS audit logs endpoint
 router.get('/:id/sms-logs', getFileSmsLogs);

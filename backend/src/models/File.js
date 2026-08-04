@@ -109,6 +109,43 @@ const fileSchema = new mongoose.Schema(
       default: 0, // 0 = Standard, 1 = Medium, 2 = High/Urgent
       index: true,
     },
+    documentVerification: {
+      scannedAt: { type: Date },
+      detectedType: { type: String },
+      ocrConfidence: { type: Number },
+      qualityScore: { type: Number },
+      completenessScore: { type: Number },
+      detectedLanguage: { type: String },
+      isQualityPassed: { type: Boolean },
+      missingKeywords: [{ type: String }],
+      missingDocuments: [{ type: String }],
+    },
+    documentVerifications: [
+      {
+        documentLabel: { type: String, required: true },
+        imagePreview: { type: String },
+        scannedAt: { type: Date, default: Date.now },
+        detectedType: { type: String },
+        ocrConfidence: { type: Number },
+        qualityScore: { type: Number },
+        completenessScore: { type: Number },
+        detectedLanguage: { type: String },
+        isQualityPassed: { type: Boolean },
+        missingKeywords: [{ type: String }],
+        status: {
+          type: String,
+          enum: ['not_uploaded', 'verified', 'needs_review', 'unverified'],
+          default: 'unverified',
+        },
+        extractedTextPreview: { type: String },
+      },
+    ],
+    verificationStatus: {
+      type: String,
+      enum: ['complete', 'missing-documents', 'needs-correction', 'unverified'],
+      default: 'unverified',
+      index: true,
+    },
     isClosed: {
       type: Boolean,
       default: false,

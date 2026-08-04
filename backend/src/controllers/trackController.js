@@ -37,6 +37,7 @@ export async function trackFile(req, res, next) {
     // delays and correction loops clearly without exposing internal officer notes.
     const citizenTimeline = movements.map((log) => {
       let displayMessage = log.notes || log.actionType;
+      let displayStatus = log.actionType === 'Verified' ? 'Document Verified' : log.actionType;
 
       if (log.actionType === FILE_STATUSES.IN_TRANSIT) {
         displayMessage = log.backtrackReason
@@ -51,7 +52,7 @@ export async function trackFile(req, res, next) {
       }
 
       return {
-        status: log.actionType,
+        status: displayStatus,
         location: log.currentLocation,
         timestamp: log.timestamp,
         message: displayMessage,
@@ -95,6 +96,10 @@ export async function trackFile(req, res, next) {
       smsNotificationsSent: smsCount,
       emailNotificationsActive: Boolean(file.citizenEmail),
       timeline: citizenTimeline,
+      documentVerification: file.documentVerification || null,
+      documentVerifications: file.documentVerifications || [],
+      verificationStatus: file.verificationStatus || 'unverified',
+      requiredDocuments: file.requiredDocuments || [],
     });
   } catch (err) {
     next(err);

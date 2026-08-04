@@ -7,3 +7,6 @@ scikit-learn==1.5.2
 pydantic==2.10.4
 Pillow==10.4.0
 certifi>=2024.12.14
+opencv-python-headless==4.10.0.84
+joblib==1.4.2
+pymongo==4.10.1

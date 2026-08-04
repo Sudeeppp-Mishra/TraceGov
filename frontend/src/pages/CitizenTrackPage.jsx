@@ -160,11 +160,28 @@ function ProgressRail({ file }) {
 // citizen actually needs — where the file is, when to expect progress, and
 // whether they must do anything.
 function StatusCard({ fileDetails, aiEstimate, autoRefresh, onAutoRefreshChange }) {
+  const missingDocs = (Array.isArray(fileDetails.documentVerifications) && fileDetails.documentVerifications.length > 0)
+    ? fileDetails.documentVerifications.filter((dv) => dv.status !== 'verified').map((dv) => dv.documentLabel)
+    : (fileDetails.missingDocuments || fileDetails.documentVerification?.missingKeywords || fileDetails.documentVerification?.missingDocuments || []);
+  const hasMissingDocs = missingDocs.length > 0 || fileDetails.verificationStatus === 'missing-documents';
+
   const statusCopy = getStatusCopy(fileDetails.currentStatus);
   const latestReason = getLatestReason(fileDetails.timeline);
   const expectedUpdate = getExpectedUpdate(fileDetails, aiEstimate);
-  const needsAction = CORRECTION_STATUSES.includes(fileDetails.currentStatus);
+  const needsAction = CORRECTION_STATUSES.includes(fileDetails.currentStatus) || hasMissingDocs;
   const isClosed = fileDetails.currentStatus === 'Dispatched';
+
+  const cardTitle = hasMissingDocs
+    ? 'Action Required: Remaining Document(s) Needed'
+    : statusCopy.title;
+
+  const cardSummary = hasMissingDocs
+    ? `The office registered your file at ${fileDetails.currentLocation || 'Reception'}, but required document(s) are missing from the checklist. Please submit them to proceed.`
+    : statusCopy.summary;
+
+  const citizenActionText = hasMissingDocs
+    ? `Please bring or submit the missing document(s) listed below to ${fileDetails.currentLocation || 'Reception'}.`
+    : statusCopy.citizenAction;
 
   return (
     <Card className="overflow-hidden p-0">
@@ -172,10 +189,10 @@ function StatusCard({ fileDetails, aiEstimate, autoRefresh, onAutoRefreshChange 
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="max-w-2xl">
             <p className="font-mono text-xs text-muted-foreground">{fileDetails.trackingId} · {fileDetails.documentType} · Ward {fileDetails.wardCode}</p>
-            <h2 className="mt-3 text-2xl font-bold tracking-tight text-foreground md:text-3xl">{statusCopy.title}</h2>
-            <p className="mt-3 text-base leading-7 text-muted-foreground">{statusCopy.summary}</p>
+            <h2 className="mt-3 text-2xl font-bold tracking-tight text-foreground md:text-3xl">{cardTitle}</h2>
+            <p className="mt-3 text-base leading-7 text-muted-foreground">{cardSummary}</p>
           </div>
-          <Badge status={fileDetails.currentStatus} />
+          <Badge status={hasMissingDocs ? 'Backtracked' : fileDetails.currentStatus} />
         </div>
       </div>
 
@@ -195,13 +212,36 @@ function StatusCard({ fileDetails, aiEstimate, autoRefresh, onAutoRefreshChange 
             </dt>
             <dd className="mt-2 text-sm font-bold text-foreground">{expectedUpdate}</dd>
           </div>
-          <div className={`rounded-xl border p-4 ${needsAction ? 'border-red-500/20 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5'}`}>
-            <dt className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${needsAction ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
-              {needsAction ? <Icons.AlertCircle className="h-4 w-4" /> : <Icons.CheckCircle className="h-4 w-4" />} Your action
+          <div className={`rounded-xl border p-4 ${needsAction ? 'border-amber-500/30 bg-amber-500/10' : 'border-emerald-500/20 bg-emerald-500/5'}`}>
+            <dt className={`flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider ${needsAction ? 'text-amber-800 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-400'}`}>
+              {needsAction ? <Icons.AlertCircle className="h-4 w-4 shrink-0 text-amber-600" /> : <Icons.CheckCircle className="h-4 w-4 shrink-0" />} Your action
             </dt>
-            <dd className="mt-2 text-sm font-medium text-foreground">{statusCopy.citizenAction}</dd>
+            <dd className="mt-2 text-sm font-medium text-foreground">{citizenActionText}</dd>
           </div>
         </dl>
+
+        {hasMissingDocs && (
+          <div className="mt-5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">
+              <Icons.AlertCircle className="h-4.5 w-4.5 text-amber-600 shrink-0" />
+              Remaining Required Document(s) Needed ({missingDocs.length})
+            </div>
+            <p className="mt-1 text-xs text-amber-900/80 dark:text-amber-300/80">
+              The AI document check detected that the following required checklist item(s) are missing:
+            </p>
+            <ul className="mt-2.5 space-y-1.5 pl-1">
+              {missingDocs.map((doc) => (
+                <li key={doc} className="flex items-center gap-2 text-xs font-semibold text-amber-950 dark:text-amber-100">
+                  <span className="flex h-4.5 w-4.5 items-center justify-center rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-bold">!</span>
+                  {doc}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-xs text-amber-900/80 dark:text-amber-300/80 italic">
+              Please present these remaining document(s) at <strong>{fileDetails.currentLocation || 'Reception'}</strong> so processing can continue without delay.
+            </p>
+          </div>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-xs">
           <div className="flex flex-wrap items-center gap-4">
@@ -227,7 +267,7 @@ function StatusCard({ fileDetails, aiEstimate, autoRefresh, onAutoRefreshChange 
           <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 font-bold text-emerald-600">✓ Notifications Active</span>
         </div>
 
-        {needsAction && latestReason && (
+        {CORRECTION_STATUSES.includes(fileDetails.currentStatus) && latestReason && (
           <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-red-700 dark:text-red-300">Latest correction reason</p>
             <p className="mt-1 text-sm font-medium text-red-700/90 dark:text-red-300/90">{latestReason}</p>
@@ -333,8 +373,18 @@ export default function CitizenTrackPage() {
   const stopCameraScanner = useCallback(() => {
     setIsScannerOpen(false);
     setScannerInitializing(false);
-    if (qrScannerRef.current) {
-      qrScannerRef.current.stop().then(() => { qrScannerRef.current = null; }).catch(() => {});
+    const scanner = qrScannerRef.current;
+    qrScannerRef.current = null;
+    if (scanner) {
+      try {
+        if (scanner.isScanning) {
+          scanner.stop().catch(() => {});
+        } else if (typeof scanner.clear === 'function') {
+          scanner.clear().catch(() => {});
+        }
+      } catch {
+        // Ignore html5-qrcode error
+      }
     }
   }, []);
 
@@ -522,7 +572,7 @@ export default function CitizenTrackPage() {
                     {fileDetails.timeline.map((item, idx) => (
                       <TimelineItem
                         key={`${item.timestamp}-${idx}`}
-                        title={item.status}
+                        title={item.status === 'Verified' ? 'Document Verified' : item.status}
                         meta={new Date(item.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         tone={CORRECTION_STATUSES.includes(item.status) || item.status === 'Rejected' ? 'red' : ['Approved', 'Verified', 'Dispatched'].includes(item.status) ? 'emerald' : 'primary'}
                       >

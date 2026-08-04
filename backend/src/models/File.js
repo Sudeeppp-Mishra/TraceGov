@@ -109,6 +109,17 @@ const fileSchema = new mongoose.Schema(
       default: 0, // 0 = Standard, 1 = Medium, 2 = High/Urgent
       index: true,
     },
+    documentVerification: {
+      scannedAt: { type: Date },
+      detectedType: { type: String },
+      ocrConfidence: { type: Number },
+      qualityScore: { type: Number },
+      completenessScore: { type: Number },
+      detectedLanguage: { type: String },
+      isQualityPassed: { type: Boolean },
+      missingKeywords: [{ type: String }],
+      missingDocuments: [{ type: String }],
+    },
     isClosed: {
       type: Boolean,
       default: false,

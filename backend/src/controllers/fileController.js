@@ -43,6 +43,7 @@ export async function registerFile(req, res, next) {
       documentType,
       requiredDocuments = [],
       internalNotes,
+      documentVerification,
     } = req.body;
 
     if (!title || !citizenName || !citizenPhone || !documentType) {
@@ -100,6 +101,17 @@ export async function registerFile(req, res, next) {
       qrDataUrl: dataUrl,
       requiredDocuments,
       internalNotes,
+      documentVerification: documentVerification ? {
+        scannedAt: new Date(),
+        detectedType: documentVerification.detectedType || documentVerification.documentType,
+        ocrConfidence: documentVerification.ocrConfidence,
+        qualityScore: documentVerification.qualityScore,
+        completenessScore: documentVerification.completenessScore,
+        detectedLanguage: documentVerification.detectedLanguage,
+        isQualityPassed: documentVerification.isQualityPassed ?? true,
+        missingKeywords: documentVerification.missingKeywords || [],
+        missingDocuments: documentVerification.missingDocuments || documentVerification.missingKeywords || [],
+      } : undefined,
     });
 
     // Write initial log to immutable ledger
@@ -119,10 +131,12 @@ export async function registerFile(req, res, next) {
     });
 
     // Notify citizen via Email if email address was provided
+    const missingDocs = (documentVerification?.missingKeywords || documentVerification?.missingDocuments || []);
     const emailResult = await sendEmailNotification({
       file,
       status: FILE_STATUSES.RECEIVED,
       location: currentLocation,
+      missingDocuments: missingDocs,
     });
 
     return res.status(201).json({
@@ -193,7 +207,7 @@ export async function getDashboardSummary(req, res, next) {
         .sort({ updatedAt: -1 })
         .limit(8)
         .populate('assignedOfficerId', 'name deskLocation')
-        .select('fileUid title citizenName documentType currentStatus currentLocation updatedAt createdAt requiredDocuments')
+        .select('fileUid title citizenName documentType currentStatus currentLocation updatedAt createdAt requiredDocuments documentVerification')
         .lean(),
       // Ward-scoped updates (restricted to files visible under baseFilter)
       MovementHistory.find({ fileId: { $in: wardFileIds } })
@@ -379,6 +393,7 @@ export async function scanFile(req, res, next) {
         requiredDocuments: file.requiredDocuments,
         assignedOfficer: file.assignedOfficerId,
         updatedAt: file.updatedAt,
+        documentVerification: file.documentVerification || null,
       },
       recentHistory,
       auditChainValid: integrityReport.valid,
@@ -504,6 +519,12 @@ async function sendFileCore(req, res, next, { direction, targetLocation, nextSta
         if (archiveDesk) destinationDesk = archiveDesk.name;
       }
 
+      // Block sending if required documents are missing
+      const missingList = file.documentVerification?.missingKeywords || file.documentVerification?.missingDocuments || [];
+      if (missingList.length > 0) {
+        throw new Error(`MISSING_DOCS:${missingList.join(', ')}`);
+      }
+
       file.targetLocation = destinationDesk;
       file.currentStatus = FILE_STATUSES.IN_TRANSIT;
       await file.save({ session });
@@ -560,6 +581,13 @@ async function sendFileCore(req, res, next, { direction, targetLocation, nextSta
       emailNotified: emailResult?.success ?? false,
     });
   } catch (err) {
+    if (err.message?.startsWith('MISSING_DOCS:')) {
+      const missingStr = err.message.replace('MISSING_DOCS:', '');
+      return res.status(400).json({
+        error: `Cannot forward or backtrack file until missing required document(s) are submitted: ${missingStr}. Please resolve missing documents first.`,
+        missingDocuments: missingStr.split(', '),
+      });
+    }
     if (err.message === 'File not found') {
       return res.status(404).json({ error: 'File not found' });
     }
@@ -570,6 +598,75 @@ async function sendFileCore(req, res, next, { direction, targetLocation, nextSta
       return res.status(400).json({ error: 'This file is already in transit to a destination desk.' });
     }
     throw err;
+  }
+}
+
+/**
+ * Resolves missing document requirements for a file after officer inspection or AI scan.
+ */
+export async function resolveMissingDocuments(req, res, next) {
+  try {
+    const { documentVerification, resolvedKeywords = [], notes } = req.body;
+
+    const file = await File.findById(req.params.id);
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    const existingVerification = file.documentVerification || {};
+    const currentMissing = existingVerification.missingKeywords || existingVerification.missingDocuments || [];
+
+    let remainingMissing = [];
+    if (resolvedKeywords && resolvedKeywords.length > 0) {
+      remainingMissing = currentMissing.filter(
+        (kw) => !resolvedKeywords.some((r) => r.toLowerCase().trim() === kw.toLowerCase().trim())
+      );
+    } else {
+      remainingMissing = [];
+    }
+
+    const isFullyResolved = remainingMissing.length === 0;
+
+    file.documentVerification = {
+      ...existingVerification,
+      scannedAt: new Date(),
+      detectedType: documentVerification?.detectedType || existingVerification.detectedType || file.documentType,
+      ocrConfidence: documentVerification?.ocrConfidence ?? existingVerification.ocrConfidence ?? 0.9,
+      qualityScore: documentVerification?.qualityScore ?? existingVerification.qualityScore ?? 0.9,
+      completenessScore: isFullyResolved ? 1.0 : (documentVerification?.completenessScore ?? existingVerification.completenessScore ?? 0.8),
+      detectedLanguage: documentVerification?.detectedLanguage || existingVerification.detectedLanguage || 'np',
+      isQualityPassed: isFullyResolved,
+      missingKeywords: remainingMissing,
+      missingDocuments: remainingMissing,
+    };
+
+    await file.save();
+
+    await appendMovementLog({
+      fileId: file._id,
+      officerId: req.user._id,
+      actionType: isFullyResolved ? 'Document Verified' : file.currentStatus,
+      currentLocation: file.currentLocation,
+      notes: notes || (isFullyResolved ? 'All required physical document(s) verified by officer. Application processing resumed.' : `Updated missing documents checklist. Remaining: ${remainingMissing.join(', ')}`),
+    });
+
+    const emailResult = await sendEmailNotification({
+      file,
+      status: isFullyResolved ? 'Document Verified' : file.currentStatus,
+      location: file.currentLocation,
+      notes: isFullyResolved ? 'All required physical document(s) have been verified by the office. Your application processing has resumed.' : undefined,
+      missingDocuments: remainingMissing,
+    });
+
+    return res.json({
+      success: true,
+      file,
+      remainingMissing,
+      isFullyResolved,
+      emailNotified: emailResult?.success ?? false,
+    });
+  } catch (err) {
+    next(err);
   }
 }
 
@@ -673,6 +770,40 @@ export async function receiveFile(req, res, next) {
 }
 
 /**
+ * Search active files with filters.
+ */
+export async function searchFiles(req, res, next) {
+  try {
+    const { q, status, wardCode, limit = 20 } = req.query;
+    const filter = { isClosed: false };
+
+    if (status) filter.currentStatus = status;
+    if (wardCode) filter.wardCode = wardCode;
+    else if (req.user?.role === 'officer') filter.wardCode = req.user.wardCode;
+
+    if (q) {
+      const regex = new RegExp(q.trim(), 'i');
+      filter.$or = [
+        { fileUid: regex },
+        { trackingId: regex },
+        { citizenName: regex },
+        { title: regex },
+      ];
+    }
+
+    const files = await File.find(filter)
+      .select('fileUid trackingId title citizenName currentStatus currentLocation updatedAt documentVerification')
+      .sort({ updatedAt: -1 })
+      .limit(Math.min(Number(limit), 50))
+      .lean();
+
+    return res.json({ success: true, files, count: files.length });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * Retrieve open files for the officer's inbox.
  * `scope=ward` (default) returns every open file in the officer's ward;
  * `scope=desk` narrows to files currently sitting at the officer's own desk;
@@ -698,7 +829,7 @@ export async function getOfficerInbox(req, res, next) {
     }
 
     let query = File.find(filter)
-      .select('fileUid trackingId title citizenName currentStatus currentLocation targetLocation updatedAt createdAt')
+      .select('fileUid trackingId title citizenName currentStatus currentLocation targetLocation updatedAt createdAt documentVerification')
       .sort({ updatedAt: -1 })
       .limit(Math.min(Number(limit) || 200, 200));
 

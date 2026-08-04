@@ -11,6 +11,7 @@ import {
   getActivityLog,
   getFileSmsLogs,
   resolveMissingDocuments,
+  reOcrDocumentVerification,
 } from '../controllers/fileController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { validateRegisterFile, validateForward, validateBacktrack } from '../middleware/validation.js';
@@ -37,6 +38,9 @@ router.post('/:id/forward', validateForward, forwardFile);
 router.post('/:id/backtrack', validateBacktrack, backtrackFile);
 router.post('/:id/receive', receiveFile);
 router.put('/:id/resolve-documents', resolveMissingDocuments);
+
+// Tier-3 #13: per-documentVerification re-OCR (officer refresh).
+router.post('/:id/document-verifications/:idx/re-ocr', reOcrDocumentVerification);
 
 // SMS audit logs endpoint
 router.get('/:id/sms-logs', getFileSmsLogs);

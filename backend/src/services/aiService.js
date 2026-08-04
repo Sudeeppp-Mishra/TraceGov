@@ -34,8 +34,12 @@ async function callAiService(path, body, timeoutMs = 4000) {
  * gets its own generous timeout instead.
  */
 export async function aiAnalyzeDocument({ imageBase64, requiredKeywords, detectedText }) {
+  // Tier-3 #15: multi-page arrays. Each page costs ~OCR_time so a 5-page
+  // document needs a much wider timeout than the single-page 90s default.
+  const isArray = Array.isArray(imageBase64);
+  const timeoutMs = isArray ? Math.max(90000, (imageBase64.length || 1) * 90000) : 90000;
   try {
-    return await callAiService('/analyze-document', { imageBase64, requiredKeywords, detectedText }, 90000);
+    return await callAiService('/analyze-document', { imageBase64, requiredKeywords, detectedText }, timeoutMs);
   } catch {
     return {
       documentType: 'Unknown',

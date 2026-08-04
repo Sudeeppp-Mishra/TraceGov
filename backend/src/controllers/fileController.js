@@ -9,10 +9,35 @@ import { generateQrCode, parseQrPayload } from '../services/qrService.js';
 import { appendMovementLog, verifyLogChain } from '../services/ledgerService.js';
 import { sendSmsNotification } from '../services/smsService.js';
 import { sendEmailNotification } from '../services/emailService.js';
+import { aiAnalyzeDocument } from '../services/aiService.js';
 
 // Helper: Calculate processing time differences in minutes
 function minutesBetween(a, b) {
   return Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000));
+}
+
+// Helper: Normalize the AI service's stampAnalysis payload before persisting.
+// Tier-3 #14: keep stampRegions[] (bounded to 5 entries per stamp detector)
+// so the frontend can render bounding-box overlays over the scan preview.
+function sanitizeStampAnalysis(sa) {
+  if (!sa || typeof sa !== 'object') return undefined;
+  const regions = Array.isArray(sa.stampRegions) ? sa.stampRegions.slice(0, 5) : [];
+  return {
+    stampDetected: !!sa.stampDetected,
+    stampColor: sa.stampColor || null,
+    stampConfidence: typeof sa.stampConfidence === 'number' ? sa.stampConfidence : 0,
+    stampCount: typeof sa.stampCount === 'number' ? sa.stampCount : regions.length,
+    stampRegions: regions.map((r) => ({
+      area: typeof r.area === 'number' ? r.area : 0,
+      circularity: typeof r.circularity === 'number' ? r.circularity : 0,
+      boundingBox: {
+        x: r.boundingBox?.x || 0,
+        y: r.boundingBox?.y || 0,
+        w: r.boundingBox?.w || 0,
+        h: r.boundingBox?.h || 0,
+      },
+    })),
+  };
 }
 
 // Helper: Local fallback risk classification
@@ -38,6 +63,7 @@ export async function registerFile(req, res, next) {
     const {
       title,
       citizenName,
+      citizenNameNepali,
       citizenPhone,
       citizenEmail,
       documentType,
@@ -133,6 +159,7 @@ export async function registerFile(req, res, next) {
       trackingId,
       title,
       citizenName,
+      citizenNameNepali: citizenNameNepali || undefined,
       citizenPhone: cleanPhone,
       citizenEmail: citizenEmail ? citizenEmail.trim().toLowerCase() : undefined,
       documentType,
@@ -159,6 +186,21 @@ export async function registerFile(req, res, next) {
       documentVerifications: Array.isArray(documentVerifications) ? documentVerifications.map((dv) => ({
         documentLabel: dv.documentLabel || 'Attachment',
         imagePreview: dv.imagePreview || null,
+        // Tier-3 #15: multi-page. Cap at 10 pages × 2MB each to keep the
+        // Mongo document bounded; the frontend compresses before upload.
+        imagePreviews: Array.isArray(dv.imagePreviews) && dv.imagePreviews.length > 0
+          ? dv.imagePreviews.slice(0, 10).map((p) => String(p).slice(0, 2_000_000))
+          : (dv.imagePreview ? [String(dv.imagePreview).slice(0, 2_000_000)] : []),
+        pages: Array.isArray(dv.pages) ? dv.pages.slice(0, 10).map((p) => ({
+          pageIndex: p.pageIndex || 0,
+          extractedTextPreview: p.extractedTextPreview || '',
+          extractedText: p.extractedText || '',
+          completenessScore: p.completenessScore || 0,
+          ocrConfidence: p.ocrConfidence || 0,
+          imageWidth: p.imageWidth || 0,
+          imageHeight: p.imageHeight || 0,
+          textBoxes: Array.isArray(p.textBoxes) ? p.textBoxes : [],
+        })) : [],
         scannedAt: dv.scannedAt || new Date(),
         detectedType: dv.detectedType || null,
         ocrConfidence: dv.ocrConfidence || 0,
@@ -169,6 +211,24 @@ export async function registerFile(req, res, next) {
         missingKeywords: dv.missingKeywords || [],
         status: dv.status || 'unverified',
         extractedTextPreview: dv.extractedTextPreview || null,
+        extractedText: dv.extractedText || null,
+        // Tier-3 #12: per-word bounding boxes for the side-by-side review modal.
+        textBoxes: Array.isArray(dv.textBoxes) ? dv.textBoxes.slice(0, 200).map((tb) => ({
+          text: String(tb.text || ''),
+          bbox: Array.isArray(tb.bbox) ? tb.bbox.map((p) => [Number(p[0]) || 0, Number(p[1]) || 0]) : [],
+          confidence: typeof tb.confidence === 'number' ? tb.confidence : 0,
+        })) : [],
+        imageWidth: typeof dv.imageWidth === 'number' ? dv.imageWidth : 0,
+        imageHeight: typeof dv.imageHeight === 'number' ? dv.imageHeight : 0,
+        imageQualityIssue: dv.imageQualityIssue ? {
+          noTextDetected: !!dv.imageQualityIssue.noTextDetected,
+          isBlurry: !!dv.imageQualityIssue.isBlurry,
+          isDark: !!dv.imageQualityIssue.isDark,
+          qualityScore: typeof dv.imageQualityIssue.qualityScore === 'number' ? dv.imageQualityIssue.qualityScore : 0,
+          isQualityPassed: dv.imageQualityIssue.isQualityPassed ?? true,
+          issueDescription: dv.imageQualityIssue.issueDescription || null,
+        } : undefined,
+        stampAnalysis: dv.stampAnalysis ? sanitizeStampAnalysis(dv.stampAnalysis) : undefined,
       })) : [],
     });
 
@@ -707,6 +767,20 @@ export async function resolveMissingDocuments(req, res, next) {
       file.documentVerifications = documentVerifications.map((dv) => ({
         documentLabel: dv.documentLabel || 'Attachment',
         imagePreview: dv.imagePreview || null,
+        // Tier-3 #15: multi-page persistence.
+        imagePreviews: Array.isArray(dv.imagePreviews) && dv.imagePreviews.length > 0
+          ? dv.imagePreviews.slice(0, 10).map((p) => String(p).slice(0, 2_000_000))
+          : (dv.imagePreview ? [String(dv.imagePreview).slice(0, 2_000_000)] : []),
+        pages: Array.isArray(dv.pages) ? dv.pages.slice(0, 10).map((p) => ({
+          pageIndex: p.pageIndex || 0,
+          extractedTextPreview: p.extractedTextPreview || '',
+          extractedText: p.extractedText || '',
+          completenessScore: p.completenessScore || 0,
+          ocrConfidence: p.ocrConfidence || 0,
+          imageWidth: p.imageWidth || 0,
+          imageHeight: p.imageHeight || 0,
+          textBoxes: Array.isArray(p.textBoxes) ? p.textBoxes : [],
+        })) : [],
         scannedAt: dv.scannedAt || new Date(),
         detectedType: dv.detectedType || null,
         ocrConfidence: dv.ocrConfidence || 0.9,
@@ -717,6 +791,24 @@ export async function resolveMissingDocuments(req, res, next) {
         missingKeywords: dv.missingKeywords || [],
         status: dv.status || 'verified',
         extractedTextPreview: dv.extractedTextPreview || null,
+        extractedText: dv.extractedText || null,
+        // Tier-3 #12: per-word bounding boxes for the side-by-side review modal.
+        textBoxes: Array.isArray(dv.textBoxes) ? dv.textBoxes.slice(0, 200).map((tb) => ({
+          text: String(tb.text || ''),
+          bbox: Array.isArray(tb.bbox) ? tb.bbox.map((p) => [Number(p[0]) || 0, Number(p[1]) || 0]) : [],
+          confidence: typeof tb.confidence === 'number' ? tb.confidence : 0,
+        })) : [],
+        imageWidth: typeof dv.imageWidth === 'number' ? dv.imageWidth : 0,
+        imageHeight: typeof dv.imageHeight === 'number' ? dv.imageHeight : 0,
+        imageQualityIssue: dv.imageQualityIssue ? {
+          noTextDetected: !!dv.imageQualityIssue.noTextDetected,
+          isBlurry: !!dv.imageQualityIssue.isBlurry,
+          isDark: !!dv.imageQualityIssue.isDark,
+          qualityScore: typeof dv.imageQualityIssue.qualityScore === 'number' ? dv.imageQualityIssue.qualityScore : 0,
+          isQualityPassed: dv.imageQualityIssue.isQualityPassed ?? true,
+          issueDescription: dv.imageQualityIssue.issueDescription || null,
+        } : undefined,
+        stampAnalysis: dv.stampAnalysis ? sanitizeStampAnalysis(dv.stampAnalysis) : undefined,
       }));
     }
 
@@ -1067,6 +1159,122 @@ export async function getFileSmsLogs(req, res, next) {
       citizenName: file.citizenName,
       logs: smsLogs,
       count: smsLogs.length,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Tier-3 #13: Re-run OCR on a single persisted `documentVerifications[]` entry.
+ *
+ * Officers sometimes want to refresh a scan without re-registering the file —
+ * e.g. the original photo was blurry, or the AI service has improved and they
+ * want the new confidence numbers. This endpoint re-invokes the AI service
+ * against the stored `imagePreview` (or a newly-supplied `imageBase64` from
+ * the officer's camera), atomically replaces that one entry on the file,
+ * recomputes the parent `verificationStatus` + `missingDocuments[]`, and
+ * notifies the citizen if anything flipped to verified.
+ */
+export async function reOcrDocumentVerification(req, res, next) {
+  try {
+    const { id, idx } = req.params;
+    const idxNum = parseInt(idx, 10);
+    if (!Number.isInteger(idxNum) || idxNum < 0) {
+      return res.status(400).json({ error: 'Invalid documentVerification index' });
+    }
+
+    const file = await File.findOne({ _id: id, isDeleted: { $ne: true } });
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    if (!Array.isArray(file.documentVerifications) || idxNum >= file.documentVerifications.length) {
+      return res.status(400).json({ error: 'Invalid documentVerification index' });
+    }
+
+    const { imageBase64, requiredKeywords, citizenName, citizenNameNepali } = req.body || {};
+    const dv = file.documentVerifications[idxNum];
+
+    // Fall back to the stored preview if no new image was supplied.
+    const sourceImage = imageBase64 || dv.imagePreview;
+    if (!sourceImage) {
+      return res.status(400).json({ error: 'No image available for re-OCR (stored preview is missing).' });
+    }
+
+    // Re-invoke the AI service. Same call shape as initial registration.
+    const result = await aiAnalyzeDocument({
+      imageBase64: sourceImage,
+      requiredKeywords: Array.isArray(requiredKeywords) && requiredKeywords.length > 0
+        ? requiredKeywords
+        : (dv.documentLabel ? [dv.documentLabel] : undefined),
+      citizenName,
+      citizenNameNepali,
+    });
+
+    if (result.serviceUnavailable) {
+      return res.status(502).json({ error: 'AI service unavailable', details: result });
+    }
+
+    const missingKeywords = Array.isArray(result.missingKeywords) ? result.missingKeywords : [];
+    const wasVerified = dv.status === 'verified';
+
+    // Atomically replace this entry. Preserve the original label and image so
+    // officers see a "refresh of the same scan" rather than a fresh one.
+    const previous = dv.toObject ? dv.toObject() : { ...dv };
+    file.documentVerifications[idxNum] = {
+      ...previous,
+      scannedAt: new Date(),
+      detectedType: result.documentType || previous.detectedType || null,
+      ocrConfidence: typeof result.ocrConfidence === 'number' ? result.ocrConfidence : (previous.ocrConfidence || 0),
+      qualityScore: result.imageQualityIssue?.qualityScore ?? previous.qualityScore ?? 0.85,
+      completenessScore: typeof result.completenessScore === 'number' ? result.completenessScore : (previous.completenessScore || 0),
+      detectedLanguage: result.detectedLanguage || previous.detectedLanguage || 'unknown',
+      isQualityPassed: result.imageQualityIssue?.isQualityPassed ?? previous.isQualityPassed ?? true,
+      missingKeywords,
+      status: missingKeywords.length === 0 ? 'verified' : 'needs_review',
+      extractedTextPreview: result.extractedTextPreview || null,
+      extractedText: result.extractedText || previous.extractedText || null,
+      textBoxes: Array.isArray(result.textBoxes) ? result.textBoxes.slice(0, 200).map((tb) => ({
+        text: String(tb.text || ''),
+        bbox: Array.isArray(tb.bbox) ? tb.bbox.map((p) => [Number(p[0]) || 0, Number(p[1]) || 0]) : [],
+        confidence: typeof tb.confidence === 'number' ? tb.confidence : 0,
+      })) : (previous.textBoxes || []),
+      imageWidth: typeof result.imageWidth === 'number' ? result.imageWidth : (previous.imageWidth || 0),
+      imageHeight: typeof result.imageHeight === 'number' ? result.imageHeight : (previous.imageHeight || 0),
+      imageQualityIssue: result.imageQualityIssue || previous.imageQualityIssue,
+      stampAnalysis: result.stampAnalysis ? sanitizeStampAnalysis(result.stampAnalysis) : previous.stampAnalysis,
+    };
+
+    // Recompute parent-level verificationStatus + missingDocuments.
+    const stillMissing = file.documentVerifications
+      .filter((entry) => entry.status !== 'verified')
+      .map((entry) => entry.documentLabel);
+    file.verificationStatus = stillMissing.length === 0 ? 'complete' : 'missing-documents';
+    file.missingDocuments = stillMissing;
+
+    await file.save();
+
+    // If a previously-unverified entry just flipped to verified and the file
+    // is now fully resolved, tell the citizen.
+    if (!wasVerified && file.documentVerifications[idxNum].status === 'verified' && stillMissing.length === 0) {
+      try {
+        await sendSmsNotification({
+          file,
+          status: file.currentStatus,
+          location: file.currentLocation,
+          missingDocuments: stillMissing,
+        });
+      } catch (smsErr) {
+        console.warn('reOcrDocumentVerification: SMS notification failed:', smsErr.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      documentVerification: file.documentVerifications[idxNum],
+      verificationStatus: file.verificationStatus,
+      missingDocuments: file.missingDocuments,
+      reOcrCompletedAt: new Date(),
     });
   } catch (err) {
     next(err);

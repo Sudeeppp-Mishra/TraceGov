@@ -214,10 +214,71 @@ export default function OfficerDashboard() {
   };
 
   const handleScanSuccess = async (decodedText, scanMode) => {
-    const file = await handleSelectFile(decodedText, scanMode);
-    if (file && file.currentStatus === 'In Transit') {
+    let scannedData = null;
+    try {
+      scannedData = await api.scanFile(decodedText);
+    } catch (err) {
+      return {
+        success: false,
+        error: 'No file found for this QR tag. Please check if the tag is registered in TraceGov.',
+      };
+    }
+
+    const scannedFile = scannedData?.file;
+    if (!scannedFile) {
+      return {
+        success: false,
+        error: 'No file found for this QR tag.',
+      };
+    }
+
+    // 1. Workspace-Level Scan (No file currently open)
+    if (!selectedFile) {
+      setSelectedFile(scannedFile);
+      setSelectedFileHistory(scannedData.recentHistory || []);
+      setIsAuditValid(scannedData.auditChainValid);
+      setScannedVia(scanMode);
+      setAiDelayReport(null);
+      setAiBacktrackSuggest(null);
+      setActionTab(['Dispatched', 'Approved', 'Rejected'].includes(scannedFile.currentStatus) ? 'ai' : 'forward');
+      setSearchQuery('');
+      setSearchResults([]);
+      setActiveResultIndex(-1);
+
+      if (scannedFile.currentStatus === 'In Transit') {
+        await handleReceiveFile({ scannedVia: scanMode, remarks: '' });
+      }
+      return { success: true };
+    }
+
+    // 2. In-File Verification Scan (A specific file is already open)
+    const currentUid = String(selectedFile.fileUid || '').toLowerCase().trim();
+    const currentTrackingId = String(selectedFile.trackingId || '').toLowerCase().trim();
+    const scannedUid = String(scannedFile.fileUid || '').toLowerCase().trim();
+    const scannedTrackingId = String(scannedFile.trackingId || '').toLowerCase().trim();
+
+    const isMatch = scannedUid === currentUid ||
+                    scannedTrackingId === currentTrackingId ||
+                    scannedUid === currentTrackingId ||
+                    scannedTrackingId === currentUid;
+
+    if (!isMatch) {
+      // MISMATCH: Keep open file and all form inputs untouched! Do NOT replace open file or navigate away!
+      const scannedIdDisplay = scannedFile.fileUid || scannedFile.trackingId || 'Unknown Tag';
+      return {
+        success: false,
+        error: `This QR is for "${scannedFile.title}" (${scannedIdDisplay}), not "${selectedFile.title}". Scan the correct envelope to continue.`,
+      };
+    }
+
+    // MATCH: Confirm physical custody verification on current open file
+    setScannedVia(scanMode);
+    toast.success(`Physical QR tag verification confirmed for ${selectedFile.fileUid}!`);
+
+    if (selectedFile.currentStatus === 'In Transit') {
       await handleReceiveFile({ scannedVia: scanMode, remarks: '' });
     }
+    return { success: true };
   };
 
   // Closed files (dispatched, approved, rejected) are archived — no further

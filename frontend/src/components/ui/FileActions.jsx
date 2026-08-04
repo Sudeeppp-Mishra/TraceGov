@@ -54,8 +54,12 @@ export function FileActions({
     currentUser.deskLocation.toLowerCase().trim() === selectedFile.targetLocation.toLowerCase().trim()
   );
 
-  const missingDocs = selectedFile?.documentVerification?.missingKeywords || selectedFile?.documentVerification?.missingDocuments || [];
-  const hasMissingDocs = missingDocs.length > 0;
+  const missingDocs = (Array.isArray(selectedFile?.documentVerifications) && selectedFile.documentVerifications.length > 0)
+    ? selectedFile.documentVerifications.filter((dv) => dv.status !== 'verified').map((dv) => dv.documentLabel)
+    : (selectedFile?.documentVerification?.missingKeywords || selectedFile?.documentVerification?.missingDocuments || []);
+  const hasMissingDocs = missingDocs.length > 0 || selectedFile?.verificationStatus === 'missing-documents';
+
+  const [overrideReason, setOverrideReason] = useState('');
 
   const handleReceive = (e) => {
     if (e) e.preventDefault();
@@ -86,8 +90,8 @@ export function FileActions({
       }
     }
 
-    if (hasMissingDocs) {
-      setManualReasonError(`Cannot forward file until missing required document(s) are submitted: ${missingDocs.join(', ')}. Please click 'Edit / Resolve Missing Documents'.`);
+    if (hasMissingDocs && !overrideReason.trim()) {
+      setManualReasonError(`Cannot forward file: missing required document(s) (${missingDocs.join(', ')}). Either upload missing documents or enter an official Officer Override reason below.`);
       return;
     }
 
@@ -97,6 +101,7 @@ export function FileActions({
       notes: routingNotes.trim(),
       scannedVia: isScanVerified ? scannedVia : 'manual',
       remarks: isScanVerified ? undefined : manualReason.trim(),
+      overrideReason: overrideReason.trim() || undefined,
     });
   };
 
@@ -112,11 +117,6 @@ export function FileActions({
       }
     }
 
-    if (hasMissingDocs) {
-      setManualReasonError(`Cannot backtrack file until missing required document(s) are submitted: ${missingDocs.join(', ')}. Please click 'Edit / Resolve Missing Documents'.`);
-      return;
-    }
-
     onBacktrackSubmit({
       returnLocation: backtrackLocation,
       backtrackReason: backtrackReason.trim(),
@@ -126,11 +126,9 @@ export function FileActions({
     });
   };
 
-  const handleDocFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleDocFileChangeForItem = async (docLabel, file) => {
+    if (!file || !file.type.startsWith('image/')) return;
     setDocScanError('');
-    setDocScanResult(null);
 
     const reader = new FileReader();
     reader.onload = async () => {
@@ -140,11 +138,11 @@ export function FileActions({
       try {
         const result = await api.analyzeDocument({
           imageBase64: base64,
-          requiredDocuments: missingDocs,
+          requiredKeywords: [docLabel],
         });
         setDocScanResult(result);
       } catch {
-        setDocScanError('AI OCR service offline. You can still verify missing documents manually.');
+        setDocScanError('AI OCR service offline. File photo attached for manual officer verification.');
       } finally {
         setDocScanning(false);
       }
@@ -156,8 +154,33 @@ export function FileActions({
     const fileId = selectedFile?.id || selectedFile?._id;
     if (!fileId) return;
     setResolveLoading(true);
+
     try {
+      const currentVerifications = Array.isArray(selectedFile?.documentVerifications) && selectedFile.documentVerifications.length > 0
+        ? selectedFile.documentVerifications
+        : (selectedFile?.requiredDocuments || missingDocs).map((lbl) => ({
+            documentLabel: lbl,
+            status: missingDocs.includes(lbl) ? 'not_uploaded' : 'verified',
+          }));
+
+      const updatedVerifications = currentVerifications.map((dv) => {
+        if (missingDocs.includes(dv.documentLabel)) {
+          return {
+            ...dv,
+            status: 'verified',
+            imagePreview: docScanPreview || dv.imagePreview || null,
+            scannedAt: new Date(),
+            detectedType: docScanResult?.documentType || dv.documentLabel,
+            ocrConfidence: docScanResult?.ocrConfidence || 0.9,
+            completenessScore: 1.0,
+            missingKeywords: [],
+          };
+        }
+        return dv;
+      });
+
       await api.resolveMissingDocuments(fileId, {
+        documentVerifications: updatedVerifications,
         documentVerification: docScanResult ? {
           detectedType: docScanResult.documentType,
           ocrConfidence: docScanResult.ocrConfidence,
@@ -166,8 +189,9 @@ export function FileActions({
           detectedLanguage: docScanResult.detectedLanguage,
         } : undefined,
         resolvedKeywords: missingDocs,
-        notes: resolveNotes.trim() || 'Officer verified remaining required documents.',
+        notes: resolveNotes.trim() || 'Officer uploaded and verified remaining physical documents.',
       });
+
       setIsResolveModalOpen(false);
       setDocScanPreview(null);
       setDocScanResult(null);
@@ -402,6 +426,24 @@ export function FileActions({
             onChange={(e) => setRoutingNotes(e.target.value)}
           />
 
+          {hasMissingDocs && (
+            <div className="space-y-1.5 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs">
+              <p className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1">
+                <Icons.AlertCircle className="h-4 w-4 text-amber-600 shrink-0" /> File has missing required document(s): {missingDocs.join(', ')}
+              </p>
+              <p className="text-amber-800/80 dark:text-amber-300/80">
+                To forward before resolving attachments, enter an official Officer Override reason (logged to audit ledger):
+              </p>
+              <Input
+                id="forward_override_reason"
+                placeholder="e.g. Approved verbal exemption by Ward Chair"
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                className="bg-background text-xs"
+              />
+            </div>
+          )}
+
           <div className="flex justify-end">
             <Button type="submit" variant="primary" loading={actionLoading}>
               Confirm forward <Icons.ArrowRight className="h-4 w-4" />
@@ -419,42 +461,46 @@ export function FileActions({
       >
         <div className="space-y-4">
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-950 dark:text-amber-100">
-            <p className="font-bold flex items-center gap-1.5">
-              <Icons.AlertCircle className="h-4 w-4 text-amber-600 shrink-0" /> Remaining Required Document(s):
+            <p className="font-bold flex items-center gap-1.5 mb-2">
+              <Icons.AlertCircle className="h-4 w-4 text-amber-600 shrink-0" /> Select missing item to upload/verify:
             </p>
-            <ul className="mt-1 list-disc list-inside space-y-0.5 font-semibold">
+            <div className="space-y-2">
               {missingDocs.map((doc) => (
-                <li key={doc}>{doc}</li>
+                <div key={doc} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 rounded-lg border border-amber-500/20 bg-background">
+                  <span className="font-semibold text-foreground text-xs">{doc}</span>
+                  <label className="flex items-center gap-1.5 cursor-pointer rounded-md bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors shrink-0">
+                    <Icons.Upload className="h-3.5 w-3.5" /> Upload Scan
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleDocFileChangeForItem(doc, file);
+                        e.target.value = '';
+                      }}
+                      disabled={docScanning}
+                    />
+                  </label>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
 
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-foreground">
-              Attach missing document scan (Optional AI Verification)
-            </label>
-            {!docScanPreview ? (
-              <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed border-border bg-muted/20 p-5 text-center transition-colors hover:border-border-strong">
-                <Icons.Sparkles className="h-5 w-5 text-muted-foreground" />
-                <span className="text-sm font-medium text-foreground">Choose missing document scan</span>
-                <span className="text-xs text-muted-foreground">JPG or PNG · AI will scan extracted keywords</span>
-                <input type="file" accept="image/*" className="hidden" onChange={handleDocFileChange} disabled={docScanning} />
-              </label>
-            ) : (
-              <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 p-3">
-                <img src={docScanPreview} alt="Missing doc scan" className="h-16 w-16 rounded-lg border bg-white object-cover" />
-                <div className="min-w-0 flex-1 text-xs">
-                  {docScanning ? (
-                    <p className="text-muted-foreground">Scanning document with AI OCR…</p>
-                  ) : docScanResult ? (
-                    <p className="font-semibold text-emerald-600">✓ AI OCR scan complete ({docScanResult.documentType})</p>
-                  ) : (
-                    <p className="text-muted-foreground">{docScanError || 'Scan ready'}</p>
-                  )}
-                </div>
+          {docScanPreview && (
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/20 p-3">
+              <img src={docScanPreview} alt="Missing doc scan" className="h-16 w-16 rounded-lg border bg-white object-cover shadow-xs" />
+              <div className="min-w-0 flex-1 text-xs">
+                {docScanning ? (
+                  <p className="text-muted-foreground italic animate-pulse">Scanning document with AI OCR…</p>
+                ) : docScanResult ? (
+                  <p className="font-semibold text-emerald-600">✓ AI OCR scan complete ({docScanResult.documentType || 'Verified'})</p>
+                ) : (
+                  <p className="text-muted-foreground">{docScanError || 'Attachment ready for verification'}</p>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           <Textarea
             label="Officer verification notes"

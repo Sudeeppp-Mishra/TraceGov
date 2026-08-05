@@ -104,20 +104,15 @@ def verify_citizen_name(
         matchType       : 'exact' | 'fuzzy' | 'devanagari' | 'not_found'
     """
     if not ocr_text or (not english_name and not nepali_name):
-        print(f"[NAME_VERIFY] Early return: ocr_text={bool(ocr_text)}, english={english_name}, nepali={nepali_name}")
         return _no_match()
 
     ocr_lower = ocr_text.lower()
     ocr_tokens = _tokenize(ocr_text)
 
-    print(f"[NAME_VERIFY] english_name={english_name!r}, nepali_name={nepali_name!r}")
-    print(f"[NAME_VERIFY] OCR text length={len(ocr_text)}, first 200 chars: {ocr_text[:200]!r}")
-
     # ── Strategy 1: Exact substring match (English) ────────────────────
     if english_name:
         name_lower = english_name.strip().lower()
         if name_lower and name_lower in ocr_lower:
-            print(f"[NAME_VERIFY] Strategy 1 HIT: exact English match")
             return {
                 "nameFound": True,
                 "matchedName": english_name.strip(),
@@ -129,36 +124,24 @@ def verify_citizen_name(
     if nepali_name:
         nepali_clean = nepali_name.strip()
         if nepali_clean and nepali_clean in ocr_text:
-            print(f"[NAME_VERIFY] Strategy 2 HIT: exact Nepali match")
             return {
                 "nameFound": True,
                 "matchedName": nepali_clean,
                 "matchConfidence": 0.97,
                 "matchType": "exact",
             }
-        else:
-            print(f"[NAME_VERIFY] Strategy 2 MISS: '{nepali_clean}' not found as exact substring")
 
     # ── Strategy 3: Token-level fuzzy match (English) ──────────────────
     if english_name:
         result = _fuzzy_token_match(english_name, ocr_tokens)
         if result:
-            print(f"[NAME_VERIFY] Strategy 3 HIT: fuzzy English match")
             return result
 
     # ── Strategy 4: Devanagari skeleton match (Nepali) ─────────────────
     if nepali_name:
         result = _devanagari_match(nepali_name, ocr_text)
         if result:
-            print(f"[NAME_VERIFY] Strategy 4 HIT: skeleton match")
             return result
-        else:
-            # Debug: show what skeletons look like
-            name_skel = devanagari_skeleton(nepali_name)
-            text_skel = devanagari_skeleton(ocr_text)
-            print(f"[NAME_VERIFY] Strategy 4 MISS: name_skeleton={name_skel!r} (len={len(name_skel)})")
-            print(f"[NAME_VERIFY] Strategy 4 MISS: text_skeleton first 300: {text_skel[:300]!r}")
-            print(f"[NAME_VERIFY] Strategy 4 MISS: name_skeleton in text_skeleton = {name_skel in text_skel}")
 
     # ── Strategy 5: Token-level fuzzy on Nepali (handles OCR noise) ────
     if nepali_name:

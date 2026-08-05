@@ -25,7 +25,7 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
       accent: '#2F6FED',
       bg: '#EAF1FE',
       headerTitle: 'File in transit',
-      banner: (loc) => `Your file has been dispatched and is currently in transit to <strong>${loc}</strong>.`,
+      banner: (loc) => `Your file is currently in transit to <strong>${loc}</strong>.`,
     },
     Pending: {
       accent: '#2F6FED',

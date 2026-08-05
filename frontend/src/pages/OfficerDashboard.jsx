@@ -180,7 +180,7 @@ export default function OfficerDashboard() {
       });
       const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
       const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
-      toast.success(`File dispatched to ${targetLoc}.${emailMsg}${smsMsg}`);
+      toast.success(`File transferred to ${targetLoc}.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid, actionScannedVia);
     } catch (err) {
@@ -198,7 +198,7 @@ export default function OfficerDashboard() {
       });
       const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
       const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
-      toast.success(`File return dispatched to ${targetLoc}.${emailMsg}${smsMsg}`);
+      toast.success(`File returned to ${targetLoc}.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid, actionScannedVia);
     } catch (err) {

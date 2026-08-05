@@ -30,6 +30,8 @@ export default function RegisterFilePage() {
   const [error, setError] = useState('');
   const [receipt, setReceipt] = useState(null);
 
+  const nepaliInputProps = useNepaliInput(citizenNameNepali, setCitizenNameNepali);
+
   useEffect(() => {
     const user = getStoredUser();
     if (!user) {
@@ -375,7 +377,7 @@ export default function RegisterFilePage() {
                       label="Citizen name in Nepali (नाम नेपालीमा)"
                       id="nameNepali"
                       placeholder="Type romanized e.g. aarav sharma → आरव शर्मा"
-                      {...useNepaliInput(citizenNameNepali, setCitizenNameNepali)}
+                      {...nepaliInputProps}
                       disabled={loading}
                     />
                     <Input

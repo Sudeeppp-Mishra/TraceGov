@@ -50,7 +50,10 @@ export function AppShell({ user, children }) {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const nav = [...OFFICER_NAV];
+  let nav = [...OFFICER_NAV];
+  if (user?.role === 'ward_chair') {
+    nav = nav.filter((item) => item.to !== '/register-file' && item.to !== '/inbox');
+  }
   if (user?.role === 'admin') nav.push({ to: '/admin', label: 'Administration', icon: Icons.Shield });
 
   const logout = () => {
@@ -84,7 +87,7 @@ export function AppShell({ user, children }) {
 
           <div className="flex items-center gap-2">
             <ThemeToggle className="hidden sm:flex" />
-            <NotificationBell />
+            {user?.role !== 'ward_chair' && <NotificationBell />}
             {user && (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-card py-1 pl-1 pr-2 sm:gap-2.5 sm:pr-2.5">
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
@@ -93,7 +96,7 @@ export function AppShell({ user, children }) {
                 <div className="leading-tight">
                   <p className="max-w-[92px] truncate text-xs font-semibold text-foreground sm:max-w-none">{user.name}</p>
                   <p className="max-w-[92px] truncate text-xs text-muted-foreground sm:max-w-none">
-                    Ward {user.wardCode} · {user.deskLocation}
+                    {user.role === 'ward_chair' ? `Ward ${user.wardCode} Chair (Inspector)` : `Ward ${user.wardCode} · ${user.deskLocation}`}
                   </p>
                 </div>
               </div>

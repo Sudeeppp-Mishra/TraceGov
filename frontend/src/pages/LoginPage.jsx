@@ -6,6 +6,7 @@ import { Logo, ThemeToggle } from '../components/layout';
 
 const DEMO = {
   officer: { email: 'officer@ward.gov.np', password: 'officer123' },
+  ward_chair: { email: 'wardchair.w01@ward.gov.np', password: 'demo1234' },
   admin: { email: 'admin@ward.gov.np', password: 'admin123' },
 };
 
@@ -41,12 +42,6 @@ export default function LoginPage() {
     }
   };
 
-  const fillDemo = () => {
-    setEmail(DEMO[role].email);
-    setPassword(DEMO[role].password);
-    setError('');
-  };
-
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* Left brand panel */}
@@ -80,7 +75,7 @@ export default function LoginPage() {
           </div>
 
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Sign in to your portal</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Officer & administrator verification terminal.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Officer, Ward Chair & administrator verification terminal.</p>
 
           <Tabs
             className="mt-7"
@@ -109,9 +104,41 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <button onClick={fillDemo} className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground cursor-pointer">
-            <Icons.Sparkles className="h-3.5 w-3.5" /> Fill demo {role} credentials
-          </button>
+          {role === 'officer' ? (
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => {
+                  setEmail(DEMO.officer.email);
+                  setPassword(DEMO.officer.password);
+                  setError('');
+                }}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground cursor-pointer"
+              >
+                <Icons.Sparkles className="h-3.5 w-3.5" /> Fill Officer demo
+              </button>
+              <button
+                onClick={() => {
+                  setEmail(DEMO.ward_chair.email);
+                  setPassword(DEMO.ward_chair.password);
+                  setError('');
+                }}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground cursor-pointer"
+              >
+                <Icons.Shield className="h-3.5 w-3.5" /> Fill Ward Chair demo
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setEmail(DEMO.admin.email);
+                setPassword(DEMO.admin.password);
+                setError('');
+              }}
+              className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground cursor-pointer"
+            >
+              <Icons.Sparkles className="h-3.5 w-3.5" /> Fill demo Admin credentials
+            </button>
+          )}
 
           <div className="mt-8 text-center">
             <Link to="/track" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">

@@ -13,6 +13,7 @@ export default function OfficerInbox() {
   const [currentUser, setCurrentUser] = useState(null);
   const [deskFiles, setDeskFiles] = useState([]);
   const [wardFiles, setWardFiles] = useState([]);
+  const [closedFiles, setClosedFiles] = useState([]);
   const [incomingFiles, setIncomingFiles] = useState([]);
   const [departmentQueue, setDepartmentQueue] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,21 +23,26 @@ export default function OfficerInbox() {
     const user = getStoredUser();
     if (!user) { navigate('/login'); return; }
     setCurrentUser(user);
+    if (user.role === 'ward_chair') {
+      setTab('all');
+    }
   }, [navigate]);
 
   const load = async () => {
     const user = getStoredUser();
     if (!user) return;
     try {
-      const [summary, deskData, wardData, incomingData] = await Promise.all([
+      const [summary, deskData, wardData, incomingData, closedData] = await Promise.all([
         api.dashboardSummary({ wardCode: user.wardCode }),
         api.getOfficerInbox({ scope: 'desk' }),
         api.getOfficerInbox(),
         api.getOfficerInbox({ scope: 'incoming' }),
+        api.searchFiles({ wardCode: user.wardCode, includeClosed: 'true' }),
       ]);
       setDeskFiles(deskData.files || []);
       setWardFiles(wardData.files || []);
       setIncomingFiles(incomingData.files || []);
+      setClosedFiles((closedData.files || []).filter((f) => f.isClosed));
       setDepartmentQueue(summary.departmentQueue || []);
     } catch { /* handled by empty state */ } finally {
       setLoading(false);
@@ -48,12 +54,21 @@ export default function OfficerInbox() {
   const deskLocation = currentUser?.deskLocation;
   // Longest-waiting first — that is the order work should be picked up in.
   const byOldest = (a, b) => new Date(a.updatedAt) - new Date(b.updatedAt);
+  const allWardFiles = useMemo(() => [...wardFiles].sort(byOldest), [wardFiles]);
   const atMyDesk = useMemo(() => [...deskFiles].sort(byOldest), [deskFiles]);
   const needsAttention = useMemo(
-    () => wardFiles.filter((f) => f.currentStatus === 'Backtracked' || f.currentStatus === 'Pending').sort(byOldest),
+    () => wardFiles.filter((f) => ['Backtracked', 'Pending', 'Under Review', 'Received'].includes(f.currentStatus)).sort(byOldest),
     [wardFiles]
   );
-  const list = tab === 'desk' ? atMyDesk : tab === 'incoming' ? incomingFiles : needsAttention;
+  const list = tab === 'all'
+    ? allWardFiles
+    : tab === 'desk'
+      ? atMyDesk
+      : tab === 'incoming'
+        ? incomingFiles
+        : tab === 'closed'
+          ? closedFiles
+          : needsAttention;
 
   const openFile = (file) => {
     const actionParam = file.currentStatus === 'In Transit' ? '&action=receive' : '';
@@ -61,9 +76,11 @@ export default function OfficerInbox() {
   };
 
   const TABS = [
+    { id: 'all', label: `All ward files (${allWardFiles.length})`, icon: Icons.Layers },
     { id: 'desk', label: `My desk (${atMyDesk.length})`, icon: Icons.Folder },
     { id: 'incoming', label: `Incoming in-transit (${incomingFiles.length})`, icon: Icons.Clock },
     { id: 'attention', label: `Needs attention (${needsAttention.length})`, icon: Icons.AlertCircle },
+    { id: 'closed', label: `Archived & Closed (${closedFiles.length})`, icon: Icons.CheckCircle },
   ];
 
   return (
@@ -71,8 +88,14 @@ export default function OfficerInbox() {
       <Container size="wide" className="space-y-6 pt-8">
         <PageHeading
           breadcrumbs={['Workspace', 'Inbox']}
-          title="Inbox"
-          description={deskLocation ? `Files awaiting action at the ${deskLocation}, longest-waiting first. Refreshes automatically.` : 'Files awaiting action across your ward.'}
+          title={currentUser?.role === 'ward_chair' ? 'Ward Inspection Inbox' : 'Inbox'}
+          description={
+            currentUser?.role === 'ward_chair'
+              ? `Ward Chair inspection terminal for Ward ${currentUser?.wardCode}. Inspect all active, in-transit, and archived files.`
+              : deskLocation
+                ? `Files awaiting action at the ${deskLocation}, longest-waiting first. Refreshes automatically.`
+                : 'Files awaiting action across your ward.'
+          }
         />
 
         <div className="grid items-start gap-6 lg:grid-cols-[1fr_18rem]">

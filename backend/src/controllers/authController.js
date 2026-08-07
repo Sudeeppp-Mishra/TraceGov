@@ -1,7 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User, ROLES } from '../models/User.js';
-import { MovementHistory } from '../models/MovementHistory.js';
 
 /**
  * Register a new Officer/Admin account.
@@ -63,11 +62,26 @@ export async function login(req, res, next) {
       return res.status(403).json({ error: 'This account has been deactivated' });
     }
 
+    // Auto-promote ward chair accounts if registered prior to role creation
+    if (user.email.includes('wardchair') || (user.deskLocation && user.deskLocation.toLowerCase().includes('ward chair'))) {
+      if (user.role !== ROLES.WARD_CHAIR) {
+        user.role = ROLES.WARD_CHAIR;
+        await user.save();
+      }
+    }
+
     // Guard role specificity (e.g. prevent officer logging in under admin route configuration)
-    if (role && user.role !== role) {
-      return res.status(403).json({
-        error: `Authorized access mismatch: Account is registered as "${user.role}"`,
-      });
+    if (role) {
+      if (role === 'admin' && user.role !== ROLES.ADMIN) {
+        return res.status(403).json({
+          error: `Authorized access mismatch: Account is registered as "${user.role}"`,
+        });
+      }
+      if (role === 'officer' && ![ROLES.OFFICER, ROLES.WARD_CHAIR].includes(user.role)) {
+        return res.status(403).json({
+          error: `Authorized access mismatch: Account is registered as "${user.role}"`,
+        });
+      }
     }
 
     const token = jwt.sign(
@@ -104,7 +118,7 @@ export function me(req, res) {
  */
 export async function getOfficers(req, res, next) {
   try {
-    const officers = await User.find({ role: { $in: [ROLES.OFFICER, ROLES.ADMIN] }, isActive: true })
+    const officers = await User.find({ role: { $in: [ROLES.OFFICER, ROLES.ADMIN, ROLES.WARD_CHAIR] }, isActive: true })
       .select('name email role wardCode deskLocation')
       .lean();
     return res.json(officers);

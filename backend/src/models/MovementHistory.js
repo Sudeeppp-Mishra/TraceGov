@@ -11,6 +11,7 @@ export const ACTION_TYPES = {
   RETURNED: 'Returned',
   REJECTED: 'Rejected',
   IN_TRANSIT: 'In Transit',
+  EDITED: 'Edited',
 };
 
 const movementHistorySchema = new mongoose.Schema(

@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 export const ROLES = {
   OFFICER: 'officer',
   ADMIN: 'admin',
+  WARD_CHAIR: 'ward_chair',
 };
 
 const userSchema = new mongoose.Schema(

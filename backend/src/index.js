@@ -12,6 +12,7 @@ import departmentRoutes from './routes/departments.js';
 import statsRoutes from './routes/stats.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
 import { secureHeaders } from './middleware/security.js';
+import { File } from './models/File.js';
 
 // Load environment configuration (Gmail SMTP active)
 dotenv.config();
@@ -141,6 +142,18 @@ app.use(globalErrorHandler);
 async function startServer() {
   // Connect to database
   await connectDatabase();
+
+  // Auto-seed demo files if demo dataset is missing from database
+  try {
+    const hasDemoFiles = await File.exists({ citizenPhone: /^9800000/ });
+    if (!hasDemoFiles) {
+      console.log('Seeder: Demo dataset not found in database. Automatically seeding 110 demo files...');
+      const { seedDatabase } = await import('../scripts/seed.js');
+      await seedDatabase();
+    }
+  } catch (seedErr) {
+    console.error('Seeder: Auto-seeding check error:', seedErr.message);
+  }
 
   const server = app.listen(PORT, () => {
     console.log(`TraceGov API Server successfully initialized at http://localhost:${PORT}`);

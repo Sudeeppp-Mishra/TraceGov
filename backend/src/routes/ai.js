@@ -67,7 +67,7 @@ router.post('/citizen-message', async (req, res, next) => {
 });
 
 // Apply Staff-only authentication checks to all endpoints below
-router.use(authenticate, authorize('officer', 'admin'));
+router.use(authenticate, authorize('officer', 'admin', 'ward_chair'));
 
 /**
  * Proxy OCR checking.

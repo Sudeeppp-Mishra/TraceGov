@@ -47,6 +47,13 @@ export async function trackFile(req, res, next) {
         displayMessage = log.backtrackReason
           ? `Returned for correction: ${log.backtrackReason}`
           : 'Returned for correction. Please contact the current desk for details.';
+      } else if (log.actionType === 'Document Verified') {
+        // Resolve missing-documents flow — surface a tight, citizen-friendly
+        // message that names what was just verified. Falls back to a generic
+        // confirmation if the backend log call didn't include a specific note.
+        displayStatus = 'Document Verified';
+        displayMessage = log.notes
+          || 'Required documents uploaded and verified. Processing resumed.';
       } else if (displayMessage.startsWith('Backtracked:')) {
         displayMessage = displayMessage.replace(/^Backtracked:\s*/i, 'Returned for correction: ');
       }
@@ -89,6 +96,10 @@ export async function trackFile(req, res, next) {
       documentType: file.documentType,
       currentStatus: file.currentStatus,
       currentLocation: file.currentLocation,
+      // Destination desk during IN_TRANSIT. Required by the citizen UIs that
+      // need to show "on its way to <desk>" without depending on the next
+      // MovementHistory entry; safe to expose (it's a desk name, no PII).
+      targetLocation: file.targetLocation || null,
       wardCode: file.wardCode,
       registeredAt: file.createdAt,
       lastUpdated: file.updatedAt,

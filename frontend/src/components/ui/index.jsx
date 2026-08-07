@@ -757,6 +757,71 @@ export function DonutChart({ value, max = 100, size = 132, stroke = 13, label, t
   );
 }
 
+// Smooth Area SVG chart for time-series trend visualization
+export function AreaChart({ data, height = 200, className = '' }) {
+  if (!data || data.length === 0) return null;
+  const maxVal = Math.max(...data.map((d) => d.value), 1);
+  const paddingX = 35;
+  const paddingY = 25;
+  const totalWidth = 500;
+  const chartHeight = height - paddingY * 2;
+
+  const points = data.map((d, i) => {
+    const x = paddingX + (i * (totalWidth - paddingX - 15)) / (data.length - 1 || 1);
+    const y = paddingY + chartHeight - (d.value / maxVal) * chartHeight;
+    return { x, y, value: d.value, label: d.label };
+  });
+
+  const pathD = points.reduce((acc, pt, i) => {
+    return i === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`;
+  }, '');
+
+  const areaD = `${pathD} L ${points[points.length - 1].x} ${paddingY + chartHeight} L ${points[0].x} ${paddingY + chartHeight} Z`;
+
+  return (
+    <div className={`w-full overflow-hidden ${className}`}>
+      <svg className="w-full h-auto overflow-visible" viewBox={`0 0 ${totalWidth} ${height}`}>
+        <defs>
+          <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="var(--primary)" stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+
+        {/* Grid lines */}
+        {Array.from({ length: 4 }).map((_, idx) => {
+          const y = paddingY + (chartHeight / 3) * idx;
+          const val = Math.round(maxVal - (maxVal / 3) * idx);
+          return (
+            <g key={idx} className="opacity-25">
+              <line x1={paddingX} y1={y} x2={totalWidth - 10} y2={y} stroke="var(--border-strong)" strokeWidth={1} strokeDasharray="3 3" />
+              <text x={paddingX - 8} y={y + 3} textAnchor="end" className="fill-muted-foreground text-[10px] font-mono">{val}</text>
+            </g>
+          );
+        })}
+
+        {/* Area fill & curve */}
+        <path d={areaD} fill="url(#areaGradient)" />
+        <path d={pathD} fill="none" stroke="var(--primary)" strokeWidth={2.5} strokeLinecap="round" />
+
+        {/* Data points */}
+        {points.map((pt, i) => (
+          <g key={i} className="group cursor-pointer">
+            <circle cx={pt.x} cy={pt.y} r={4} className="fill-card stroke-primary stroke-[2.5] transition-transform group-hover:scale-150" />
+            <text x={pt.x} y={pt.y - 8} textAnchor="middle" className="fill-foreground text-[11px] font-mono font-bold opacity-60 group-hover:opacity-100 transition-opacity">
+              {pt.value}
+            </text>
+            <text x={pt.x} y={height - 5} textAnchor="middle" className="fill-muted-foreground text-[10px] font-medium">
+              {pt.label}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+
 /* ───────────────────────── Icons ───────────────────────── */
 
 const mk = (path) => (props) => (

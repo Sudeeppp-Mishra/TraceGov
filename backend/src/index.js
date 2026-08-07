@@ -10,6 +10,7 @@ import trackRoutes from './routes/track.js';
 import aiRoutes from './routes/ai.js';
 import departmentRoutes from './routes/departments.js';
 import statsRoutes from './routes/stats.js';
+import categoryRoutes from './routes/categories.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
 import { secureHeaders } from './middleware/security.js';
 import { File } from './models/File.js';
@@ -127,6 +128,7 @@ app.use('/api/track', trackRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/categories', categoryRoutes);
 
 // Catch-all route for unhandled requests
 app.use((req, res) => {

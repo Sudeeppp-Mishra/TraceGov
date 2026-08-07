@@ -72,6 +72,27 @@ export const api = {
       method: 'DELETE',
     }),
 
+  // --- Document Categories API (Nagarik Bada Patra) ---
+  getCategories: () => request('/categories'),
+
+  createCategory: (payload) =>
+    request('/categories', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateCategory: (id, payload) =>
+    request(`/categories/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteCategory: (id) =>
+    request(`/categories/${id}`, {
+      method: 'DELETE',
+    }),
+
+
 
   // --- Files API ---
   registerFile: (payload) =>

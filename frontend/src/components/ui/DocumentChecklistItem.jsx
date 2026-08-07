@@ -222,8 +222,8 @@ export function DocumentChecklistItem({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         {/* Document Label */}
         <div className="flex flex-1 items-center gap-2.5 min-w-0">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground font-mono text-xs font-bold">
-            📄
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Icons.FileText className="h-4 w-4 text-primary" />
           </div>
           {isCustom ? (
             <input

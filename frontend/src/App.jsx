@@ -68,7 +68,7 @@ export default function App() {
         <Route
           path="/register-file"
           element={
-            <ProtectedRoute roles={['officer']}>
+            <ProtectedRoute roles={['officer', 'admin', 'ward_chair']}>
               <RegisterFilePage />
             </ProtectedRoute>
           }

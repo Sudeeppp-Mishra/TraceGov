@@ -992,12 +992,12 @@ function StatusCard({
                 onChange={(e) => onAutoRefreshChange(e.target.checked)}
                 className="h-4 w-4 rounded border-border bg-muted text-primary accent-primary focus:ring-primary/20"
               />
-              Auto-refresh every 30 seconds
+              Auto-refresh every 10 seconds
             </label>
             <div className="flex items-center gap-3">
               <CountdownTimer
                 enabled={autoRefresh}
-                intervalMs={30000}
+                intervalMs={10000}
                 onTick={onManualRefresh}
               />
               <Button variant="ghost" size="sm" onClick={onManualRefresh} disabled={isUpdating}>
@@ -1337,7 +1337,7 @@ export default function CitizenTrackPage() {
       return undefined;
     const interval = setInterval(() => {
       runTrack(fileDetails.trackingId, { silent: true });
-    }, 30000);
+    }, 10000);
     return () => clearInterval(interval);
   }, [autoRefresh, fileDetails, runTrack]);
 

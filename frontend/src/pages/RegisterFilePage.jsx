@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, getStoredUser } from '../lib/api';
 import { Container, Card, Button, Input, Select, Textarea, Icons, useToast, Alert } from '../components/ui';
@@ -32,6 +32,8 @@ export default function RegisterFilePage() {
 
   const nepaliInputProps = useNepaliInput(citizenNameNepali, setCitizenNameNepali);
 
+  const [dynamicCategories, setDynamicCategories] = useState([]);
+
   useEffect(() => {
     const user = getStoredUser();
     if (!user) {
@@ -39,11 +41,23 @@ export default function RegisterFilePage() {
       return;
     }
     setCurrentUser(user);
+
+    api.getCategories()
+      .then((data) => {
+        if (data.categories && data.categories.length > 0) {
+          setDynamicCategories(data.categories);
+        }
+      })
+      .catch(() => {});
   }, [navigate]);
 
   // Auto-populate checklist when document category changes
   useEffect(() => {
-    const defaultLabels = CATEGORY_CHECKLISTS[documentType] || [];
+    const activeCat = dynamicCategories.find((c) => c.name === documentType);
+    const defaultLabels = activeCat
+      ? activeCat.requiredChecklist
+      : (CATEGORY_CHECKLISTS[documentType] || []);
+
     setChecklistItems(
       defaultLabels.map((lbl, idx) => ({
         id: `doc-${idx}-${Date.now()}`,
@@ -56,7 +70,8 @@ export default function RegisterFilePage() {
         status: 'not_uploaded',
       }))
     );
-  }, [documentType]);
+  }, [documentType, dynamicCategories]);
+
 
   // Checklist Handlers
   const handleLabelChange = (id, newLabel) => {
@@ -210,12 +225,6 @@ export default function RegisterFilePage() {
   const needsReviewCount = checklistItems.filter((i) => i.status === 'needs_review').length;
   const isAnyScanning = checklistItems.some((i) => i.scanning);
 
-  const categoryMeta = CATEGORY_META[documentType] || {
-    typicalDays: '1-3',
-    deskCount: 'multi',
-    trackingValue: 'medium',
-  };
-
   // Form Submit
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -325,13 +334,36 @@ export default function RegisterFilePage() {
     setError('');
   };
 
+  const categoryMeta = useMemo(() => {
+    const dynamicFound = dynamicCategories.find((c) => c.name === documentType);
+    if (dynamicFound) {
+      return {
+        typicalDays: dynamicFound.typicalDays || '3-5',
+        deskCount: dynamicFound.deskCount || 'multi',
+        trackingValue: dynamicFound.trackingValue || 'medium',
+      };
+    }
+    return CATEGORY_META[documentType] || { typicalDays: '1-3', deskCount: 'multi', trackingValue: 'medium' };
+  }, [dynamicCategories, documentType]);
+
   // Group document categories for visual prioritization
-  const highMediumCategories = DOCUMENT_TYPES.filter(
-    (type) => CATEGORY_META[type]?.trackingValue !== 'low'
+  const activeCategoriesList = dynamicCategories.length > 0
+    ? dynamicCategories.map((c) => c.name)
+    : DOCUMENT_TYPES;
+
+  const highMediumCategories = activeCategoriesList.filter(
+    (type) => {
+      const meta = dynamicCategories.find((c) => c.name === type) || CATEGORY_META[type];
+      return meta?.trackingValue !== 'low';
+    }
   );
-  const lowCategories = DOCUMENT_TYPES.filter(
-    (type) => CATEGORY_META[type]?.trackingValue === 'low'
+  const lowCategories = activeCategoriesList.filter(
+    (type) => {
+      const meta = dynamicCategories.find((c) => c.name === type) || CATEGORY_META[type];
+      return meta?.trackingValue === 'low';
+    }
   );
+
   const file = receipt?.file;
   const receiptMissingDocs = receipt?.missingDocuments || file?.missingDocuments || checklistItems.filter(i => i.status !== 'verified').map(i => i.label);
   const isReceiptIncomplete = receipt?.verificationStatus === 'missing-documents' || file?.verificationStatus === 'missing-documents' || receiptMissingDocs.length > 0;
@@ -432,40 +464,46 @@ export default function RegisterFilePage() {
                     disabled={loading}
                   >
                     <optgroup label="Multi-Day / Multi-Desk Services (Optimal Tracking)">
-                      {highMediumCategories.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt} ({CATEGORY_META[opt]?.typicalDays || '1-3'} days)
-                        </option>
-                      ))}
+                      {highMediumCategories.map((opt) => {
+                        const meta = dynamicCategories.find((c) => c.name === opt) || CATEGORY_META[opt];
+                        return (
+                          <option key={opt} value={opt}>
+                            {opt} ({meta?.typicalDays || '1-3'} days)
+                          </option>
+                        );
+                      })}
                     </optgroup>
                     <optgroup label="Same-Day / Single-Desk Services">
-                      {lowCategories.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt} (Same Day / 0-1 day)
-                        </option>
-                      ))}
+                      {lowCategories.map((opt) => {
+                        const meta = dynamicCategories.find((c) => c.name === opt) || CATEGORY_META[opt];
+                        return (
+                          <option key={opt} value={opt}>
+                            {opt} ({meta?.typicalDays || '0-1'} day)
+                          </option>
+                        );
+                      })}
                     </optgroup>
                   </Select>
 
                   {/* Metadata Badge */}
                   <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-3 text-xs">
                     <span className="font-semibold text-foreground">Service SLA:</span>
-                    <span className="rounded-md bg-primary/10 px-2 py-0.5 font-bold text-primary">
-                      ⏱ {categoryMeta.typicalDays} Business Days
+                    <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 font-bold text-primary">
+                      <Icons.Clock className="h-3.5 w-3.5 text-primary shrink-0" /> {categoryMeta?.typicalDays || '1-3'} Business Days
                     </span>
-                    <span className="rounded-md bg-muted px-2 py-0.5 text-muted-foreground">
-                      🏢 {categoryMeta.deskCount === 'multi' ? 'Multi-Desk Workflow' : 'Single Desk Resolution'}
+                    <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-muted-foreground font-medium">
+                      <Icons.Building className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> {categoryMeta?.deskCount === 'multi' ? 'Multi-Desk Workflow' : 'Single Desk Resolution'}
                     </span>
                     <span
                       className={`rounded-md px-2 py-0.5 font-semibold ${
-                        categoryMeta.trackingValue === 'high'
+                        categoryMeta?.trackingValue === 'high'
                           ? 'bg-emerald-500/10 text-emerald-600'
-                          : categoryMeta.trackingValue === 'medium'
+                          : categoryMeta?.trackingValue === 'medium'
                           ? 'bg-blue-500/10 text-blue-600'
                           : 'bg-gray-500/10 text-gray-600'
                       }`}
                     >
-                      {categoryMeta.trackingValue.toUpperCase()} Tracking Value
+                      {(categoryMeta?.trackingValue || 'medium').toUpperCase()} Tracking Value
                     </span>
                   </div>
                 </div>

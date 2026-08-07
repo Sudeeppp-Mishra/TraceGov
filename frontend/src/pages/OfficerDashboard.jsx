@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Html5Qrcode } from 'html5-qrcode';
 import { api, getStoredUser } from '../lib/api';
 import {
-  Container, Card, Button, Input, Select, Textarea, Badge, Modal, Icons,
-  StatCard, Skeleton, EmptyState, Timeline, TimelineItem, useToast, Spinner, Tabs,
-  QrScanner, FileActions, ExtractedTextModal, StampOverlayImage, ScanReviewModal,
+  Container, Card, Button, Input, Badge, Icons,
+  StatCard, Skeleton, EmptyState, Timeline, TimelineItem, useToast,
+  QrScanner, FileActions, EditFileModal,
 } from '../components/ui';
 import { AppShell, PageHeading } from '../components/layout';
 
@@ -39,6 +38,20 @@ export default function OfficerDashboard() {
 
   // QR Scanner modal state
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+
+  // Edit file details modal state. We keep the form state inside the modal
+  // component (it snapshots the selected file on open), so the dashboard only
+  // tracks open/close + loading.
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+
+  // When the officer clicks "Edit details" without first scanning the
+  // currently-open file's QR, we open the camera scanner and remember the
+  // intent. `handleScanSuccess` flushes that intent synchronously on the
+  // match branch so the Edit modal opens directly on top of the scanner
+  // result — no flicker back to the dashboard first.
+  const pendingEditRef = useRef(false);
+  const [wardFilesList, setWardFilesList] = useState([]);
 
   // AI insights state
   const [checkingAi, setCheckingAi] = useState(false);
@@ -80,19 +93,53 @@ export default function OfficerDashboard() {
     });
   };
 
+  // Officer-initiated edit of registration fields (phone typo, wrong doc
+  // category, missing checklist item, etc.). The backend returns the updated
+  // file plus a `changes[]` diff that we surface in the success toast.
+  const handleEditSave = async (formPayload) => {
+    if (!selectedFile) return;
+    setEditSaving(true);
+    try {
+      const res = await api.editFile(selectedFile.id, formPayload);
+      // Merge the canonical file state back in (keeps open tabs / scroll
+      // position; only swaps the edited fields + assignedOfficer populate).
+      setSelectedFile((prev) => ({ ...prev, ...res.file, id: prev.id }));
+      const changeCount = Array.isArray(res.changes) ? res.changes.length : 0;
+      const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
+      const smsMsg = res?.smsNotified ? ' 📱 SMS alert sent.' : '';
+      if (changeCount === 0) {
+        toast.info('No fields actually changed — saved to ledger for audit.');
+      } else {
+        toast.success(
+          `${changeCount} field${changeCount === 1 ? '' : 's'} updated.${emailMsg}${smsMsg}`
+        );
+      }
+      await loadDashboard(currentUser.wardCode);
+      setIsEditModalOpen(false);
+    } catch (err) {
+      // Surface backend 400 details array verbatim when present so the form
+      // can attribute the error to the right field.
+      toast.error(err.message || 'Edit failed.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const loadDashboard = async (wardCode) => {
     try {
       setLoading(true);
-      const [summary, deptsData, incomingData] = await Promise.all([
+      const [summary, deptsData, incomingData, wardData] = await Promise.all([
         api.dashboardSummary({ wardCode }),
         api.getDepartments().catch(() => ({ departments: [] })),
         api.getOfficerInbox({ scope: 'incoming' }).catch(() => ({ files: [] })),
+        api.getOfficerInbox({ scope: 'ward', includeClosed: 'true', allWards: 'true', limit: 200 }).catch(() => ({ files: [] })),
       ]);
       setMetrics(summary.metrics);
       setDepartmentQueue(summary.departmentQueue || []);
       setRecentHistory(summary.recentHistory || []);
       setDepartmentsList(deptsData.departments || []);
       setIncomingFiles(incomingData.files || []);
+      setWardFilesList(wardData.files || summary.recentFiles || []);
     } catch (err) {
       toast.error('Failed to load dashboard metrics.');
     } finally {
@@ -278,6 +325,9 @@ export default function OfficerDashboard() {
     if (!isMatch) {
       // MISMATCH: Keep open file and all form inputs untouched! Do NOT replace open file or navigate away!
       const scannedIdDisplay = scannedFile.fileUid || scannedFile.trackingId || 'Unknown Tag';
+      // Clear any pending intent (e.g. officer tapped Edit before scanning but
+      // scanned the wrong envelope) so the modal doesn't pop open later.
+      pendingEditRef.current = false;
       return {
         success: false,
         error: `This QR is for "${scannedFile.title}" (${scannedIdDisplay}), not "${selectedFile.title}". Scan the correct envelope to continue.`,
@@ -287,6 +337,14 @@ export default function OfficerDashboard() {
     // MATCH: Confirm physical custody verification on current open file
     setScannedVia(scanMode);
     toast.success(`Physical QR tag verification confirmed for ${selectedFile.fileUid}!`);
+
+    // If the officer tapped "Edit details" before scanning, flush that intent
+    // synchronously so the Edit modal opens on top of the scanner result —
+    // no flicker back to the dashboard main view in between.
+    if (pendingEditRef.current) {
+      pendingEditRef.current = false;
+      setIsEditModalOpen(true);
+    }
 
     if (selectedFile.currentStatus === 'In Transit') {
       await handleReceiveFile({ scannedVia: scanMode, remarks: '' });
@@ -312,8 +370,12 @@ export default function OfficerDashboard() {
       <Container size="wide" className="space-y-6 pt-8">
         <PageHeading
           breadcrumbs={['Workspace', 'Overview']}
-          title="Officer workspace"
-          description="Search, scan and route physical files across ward desks with a full audit trail."
+          title={currentUser?.role === 'ward_chair' ? 'Ward Chair inspection terminal' : 'Officer workspace'}
+          description={
+            currentUser?.role === 'ward_chair'
+              ? 'Inspect all ward files, document OCR scans, immutable movement ledgers, and AI queue analytics in read-only mode.'
+              : 'Search, scan and route physical files across ward desks with a full audit trail.'
+          }
         />
 
         {/* Metrics */}
@@ -330,8 +392,8 @@ export default function OfficerDashboard() {
 
         <div className="grid items-start gap-6 md:grid-cols-[1.25fr_0.75fr]">
           <div className="space-y-6">
-            {/* Incoming Files in Transit Section */}
-            {incomingFiles.length > 0 && (
+            {/* Incoming Files in Transit Section (Officers only) */}
+            {incomingFiles.length > 0 && currentUser?.role !== 'ward_chair' && (
               <Card className="border-primary/30 bg-primary/[0.02]">
                 <div className="flex items-center justify-between gap-2 mb-3">
                   <div className="flex items-center gap-2">
@@ -369,98 +431,151 @@ export default function OfficerDashboard() {
               </Card>
             )}
 
-            {/* Primary QR Scan & Manual Search Card */}
-            <Card className="relative p-5">
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                    <Icons.Scan className="h-6 w-6" />
+            {/* Primary Header Card (Search for Ward Chair; Scanner for Officers) */}
+            {currentUser?.role === 'ward_chair' ? (
+              <Card className="relative p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Icons.Search className="h-5 w-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-foreground">Desk Verification Scanner</h3>
-                    <p className="text-xs text-muted-foreground">Scan envelope QR tag to route or backtrack</p>
+                    <h3 className="text-sm font-bold text-foreground">Ward File Inspection Search</h3>
+                    <p className="text-xs text-muted-foreground">Search any file in your ward by citizen, title, UID, or tracking ID</p>
+                  </div>
+                </div>
+                <Input
+                  className="w-full"
+                  icon={<Icons.Search className="h-4 w-4" />}
+                  placeholder="Search ward files by citizen, title, UID or tracking ID…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                />
+                {(searchResults.length > 0 || (searching && searchQuery)) && (
+                  <div className="absolute left-4 right-4 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
+                    {searching && searchResults.length === 0 ? (
+                      <div className="space-y-2 p-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
+                    ) : (
+                      <div id="officer-search-listbox" role="listbox" aria-label="Matching files" className="divide-y divide-border">
+                        {searchResults.map((file, idx) => (
+                          <button
+                            key={file.fileUid}
+                            id={`officer-search-option-${idx}`}
+                            role="option"
+                            aria-selected={idx === activeResultIndex}
+                            onClick={() => {
+                              handleSelectFile(file.fileUid, 'manual');
+                            }}
+                            onMouseEnter={() => setActiveResultIndex(idx)}
+                            className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors cursor-pointer ${
+                              idx === activeResultIndex ? 'bg-muted' : 'hover:bg-muted'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
+                              <span className="mt-0.5 block truncate text-sm font-semibold text-foreground">{file.title}</span>
+                              <span className="text-xs text-muted-foreground">{file.citizenName} · {file.currentLocation}</span>
+                            </div>
+                            <Badge status={file.currentStatus} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            ) : (
+              <Card className="relative p-5">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <Icons.Scan className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-foreground">Desk Verification Scanner</h3>
+                      <p className="text-xs text-muted-foreground">Scan envelope QR tag to route or backtrack</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="primary"
+                      size="md"
+                      onClick={() => setIsScannerOpen(true)}
+                      className="shadow-sm"
+                    >
+                      <Icons.Scan className="h-4 w-4" /> Scan QR Tag (Primary)
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowManualSearch(!showManualSearch)}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      {showManualSearch ? 'Hide manual search' : "Can't scan? Search manually"}
+                    </Button>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="primary"
-                    size="md"
-                    onClick={() => setIsScannerOpen(true)}
-                    className="shadow-sm"
-                  >
-                    <Icons.Scan className="h-4 w-4" /> Scan QR Tag (Primary)
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowManualSearch(!showManualSearch)}
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    {showManualSearch ? 'Hide manual search' : "Can't scan? Search manually"}
-                  </Button>
-                </div>
-              </div>
+                {showManualSearch && (
+                  <div className="mt-4 pt-4 border-t border-border animate-fade-down">
+                    <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1">
+                      <Icons.AlertCircle className="h-3.5 w-3.5" /> Manual search logged as unverified manual update. Reason required on action.
+                    </p>
+                    <Input
+                      className="w-full"
+                      icon={<Icons.Search className="h-4 w-4" />}
+                      placeholder="Search by citizen, title, UID or tracking ID…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={handleSearchKeyDown}
+                      aria-label="Search files"
+                      role="combobox"
+                      aria-expanded={searchResults.length > 0}
+                      aria-controls="officer-search-listbox"
+                      aria-autocomplete="list"
+                      aria-activedescendant={activeResultIndex >= 0 ? `officer-search-option-${activeResultIndex}` : undefined}
+                    />
+                  </div>
+                )}
 
-              {/* Secondary Fallback: Manual Search Bar */}
-              {showManualSearch && (
-                <div className="mt-4 pt-4 border-t border-border animate-fade-down">
-                  <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1">
-                    <Icons.AlertCircle className="h-3.5 w-3.5" /> Manual search logged as unverified manual update. Reason required on action.
-                  </p>
-                  <Input
-                    className="w-full"
-                    icon={<Icons.Search className="h-4 w-4" />}
-                    placeholder="Search by citizen, title, UID or tracking ID…"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onKeyDown={handleSearchKeyDown}
-                    aria-label="Search files"
-                    role="combobox"
-                    aria-expanded={searchResults.length > 0}
-                    aria-controls="officer-search-listbox"
-                    aria-autocomplete="list"
-                    aria-activedescendant={activeResultIndex >= 0 ? `officer-search-option-${activeResultIndex}` : undefined}
-                  />
-                </div>
-              )}
+                {(searchResults.length > 0 || (searching && searchQuery)) && (
+                  <div className="absolute left-4 right-4 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
+                    {searching && searchResults.length === 0 ? (
+                      <div className="space-y-2 p-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
+                    ) : (
+                      <div id="officer-search-listbox" role="listbox" aria-label="Matching files" className="divide-y divide-border">
+                        {searchResults.map((file, idx) => (
+                          <button
+                            key={file.fileUid}
+                            id={`officer-search-option-${idx}`}
+                            role="option"
+                            aria-selected={idx === activeResultIndex}
+                            onClick={() => {
+                              handleSelectFile(file.fileUid, 'manual');
+                              setShowManualSearch(false);
+                            }}
+                            onMouseEnter={() => setActiveResultIndex(idx)}
+                            className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors cursor-pointer ${
+                              idx === activeResultIndex ? 'bg-muted' : 'hover:bg-muted'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
+                              <span className="mt-0.5 block truncate text-sm font-semibold text-foreground">{file.title}</span>
+                              <span className="text-xs text-muted-foreground">{file.citizenName} · {file.currentLocation}</span>
+                            </div>
+                            <Badge status={file.currentStatus} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            )}
 
-              {(searchResults.length > 0 || (searching && searchQuery)) && (
-                <div className="absolute left-4 right-4 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
-                  {searching && searchResults.length === 0 ? (
-                    <div className="space-y-2 p-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
-                  ) : (
-                    <div id="officer-search-listbox" role="listbox" aria-label="Matching files" className="divide-y divide-border">
-                      {searchResults.map((file, idx) => (
-                        <button
-                          key={file.fileUid}
-                          id={`officer-search-option-${idx}`}
-                          role="option"
-                          aria-selected={idx === activeResultIndex}
-                          onClick={() => {
-                            handleSelectFile(file.fileUid, 'manual');
-                            setShowManualSearch(false);
-                          }}
-                          onMouseEnter={() => setActiveResultIndex(idx)}
-                          className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors cursor-pointer ${
-                            idx === activeResultIndex ? 'bg-muted' : 'hover:bg-muted'
-                          }`}
-                        >
-                          <div className="min-w-0">
-                            <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
-                            <span className="mt-0.5 block truncate text-sm font-semibold text-foreground">{file.title}</span>
-                            <span className="text-xs text-muted-foreground">{file.citizenName} · {file.currentLocation}</span>
-                          </div>
-                          <Badge status={file.currentStatus} />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </Card>
-
-            {/* Selected file */}
+            {/* Selected file view OR Inspection List view */}
             {fileLoading ? (
               <Skeleton className="h-80" />
             ) : selectedFile ? (
@@ -480,6 +595,24 @@ export default function OfficerDashboard() {
                       </p>
                     </div>
                     <Badge status={selectedFile.currentStatus} />
+                    {!isFileClosed && currentUser?.role !== 'ward_chair' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const isScanVerified = scannedVia === 'webcam' || scannedVia === 'mobile';
+                          if (!isScanVerified) {
+                            pendingEditRef.current = true;
+                            setIsScannerOpen(true);
+                            return;
+                          }
+                          setIsEditModalOpen(true);
+                        }}
+                        className="shadow-xs"
+                      >
+                        <Icons.Pencil className="h-3.5 w-3.5" /> Edit details
+                      </Button>
+                    )}
                   </div>
 
                   {isFileClosed && (
@@ -567,6 +700,43 @@ export default function OfficerDashboard() {
                   )}
                 </Card>
               </div>
+            ) : currentUser?.role === 'ward_chair' ? (
+              <Card className="p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">Ward Files for Inspection</h3>
+                    <p className="text-xs text-muted-foreground">Select any file to inspect details, OCR scans, and movement history</p>
+                  </div>
+                  <span className="text-xs font-semibold text-muted-foreground">{wardFilesList.length} files</span>
+                </div>
+                {wardFilesList.length === 0 ? (
+                  <EmptyState
+                    icon={<Icons.FileText className="h-6 w-6" />}
+                    title="No files found"
+                    description="Files registered in this ward will appear here."
+                  />
+                ) : (
+                  <div className="max-h-[550px] overflow-y-auto divide-y divide-border rounded-xl border border-border">
+                    {wardFilesList.map((file) => (
+                      <button
+                        key={file.fileUid}
+                        onClick={() => handleSelectFile(file.fileUid)}
+                        className="flex w-full items-center justify-between gap-3 p-3.5 text-left transition-colors hover:bg-muted/60 cursor-pointer"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs text-muted-foreground">{file.fileUid}</span>
+                            <Badge status={file.currentStatus} />
+                          </div>
+                          <p className="mt-0.5 truncate text-sm font-semibold text-foreground">{file.title}</p>
+                          <p className="truncate text-xs text-muted-foreground">{file.citizenName} · Currently at: <strong className="text-foreground">{file.currentLocation}</strong></p>
+                        </div>
+                        <Icons.ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Card>
             ) : (
               <EmptyState
                 icon={<Icons.Scan className="h-6 w-6" />}
@@ -609,8 +779,22 @@ export default function OfficerDashboard() {
       {/* QR Scanner Modal Component */}
       <QrScanner
         isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
+        onClose={() => {
+          // If the officer dismisses the scanner without a successful match,
+          // drop any pending-Edit intent so it doesn't fire on the next scan.
+          pendingEditRef.current = false;
+          setIsScannerOpen(false);
+        }}
         onScanSuccess={handleScanSuccess}
+      />
+
+      {/* Officer edit-details modal (corrects typos / wrong registration fields). */}
+      <EditFileModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        file={selectedFile}
+        onSave={handleEditSave}
+        loading={editSaving}
       />
     </AppShell>
   );

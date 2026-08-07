@@ -29,7 +29,7 @@ async function request(path, options = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    if (response.status === 401) {
+    if (response.status === 401 && window.location.pathname !== '/login') {
       clearSession();
       // Redirect to login page if user token is invalid or expired
       window.location.href = '/login';
@@ -106,6 +106,16 @@ export const api = {
 
   resolveMissingDocuments: (id, payload = {}) =>
     request(`/files/${id}/resolve-documents`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  // Officer-initiated edit of core registration fields on an already-scanned
+  // file (typo in phone, wrong document type, missing checklist item, etc.).
+  // The backend accepts a partial payload — only the keys you include get
+  // applied, and the response includes a `changes[]` diff for the toast.
+  editFile: (id, payload = {}) =>
+    request(`/files/${id}/details`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),

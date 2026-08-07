@@ -5,6 +5,7 @@ import { connectDatabase, disconnectDatabase } from '../src/config/db.js';
 import { User, ROLES } from '../src/models/User.js';
 import { Department } from '../src/models/Department.js';
 import { File, FILE_STATUSES } from '../src/models/File.js';
+import { SmsLog } from '../src/models/SmsLog.js';
 import { generateFileUid, generateTrackingId } from '../src/services/cryptoService.js';
 import { generateQrCode } from '../src/services/qrService.js';
 import { appendMovementLog } from '../src/services/ledgerService.js';
@@ -50,6 +51,14 @@ const SEED_USERS = [
     wardCode: 'W01',
     deskLocation: 'Admin Office',
   },
+  {
+    name: 'Ward Chair Officer',
+    email: 'wardchair@ward.gov.np',
+    password: 'chair123',
+    role: ROLES.WARD_CHAIR,
+    wardCode: 'W01',
+    deskLocation: 'Ward Chair Section',
+  },
 ];
 
 // --- Demo-only additions below (only used when --demo is passed) ---
@@ -67,9 +76,10 @@ const DEMO_DEPARTMENTS_W02 = [
 const DEMO_OFFICERS = [
   { name: 'Sunita Rai', email: 'verification.w01@ward.gov.np', password: 'demo1234', role: ROLES.OFFICER, wardCode: 'W01', deskLocation: 'Verification Desk' },
   { name: 'Bikash Thapa', email: 'tax.w01@ward.gov.np', password: 'demo1234', role: ROLES.OFFICER, wardCode: 'W01', deskLocation: 'Tax Office Desk' },
-  { name: 'Anjali Gurung', email: 'wardchair.w01@ward.gov.np', password: 'demo1234', role: ROLES.OFFICER, wardCode: 'W01', deskLocation: 'Ward Chair Section' },
+  { name: 'Anjali Gurung', email: 'wardchair.w01@ward.gov.np', password: 'demo1234', role: ROLES.WARD_CHAIR, wardCode: 'W01', deskLocation: 'Ward Chair Section' },
   { name: 'Prakash KC', email: 'reception.w02@ward.gov.np', password: 'demo1234', role: ROLES.OFFICER, wardCode: 'W02', deskLocation: 'Baneshwor Reception' },
   { name: 'Maya Shrestha', email: 'verification.w02@ward.gov.np', password: 'demo1234', role: ROLES.OFFICER, wardCode: 'W02', deskLocation: 'Baneshwor Verification Desk' },
+  { name: 'Ramesh Adhikari', email: 'wardchair.w02@ward.gov.np', password: 'demo1234', role: ROLES.WARD_CHAIR, wardCode: 'W02', deskLocation: 'Baneshwor Ward Chair Section' },
   { name: 'Bina Karki', email: 'admin.w02@ward.gov.np', password: 'demo1234', role: ROLES.ADMIN, wardCode: 'W02', deskLocation: 'Baneshwor Admin Office' },
 ];
 
@@ -253,6 +263,307 @@ const DEMO_FILE_BLUEPRINTS = [
   },
 ];
 
+// --- Historical demo data (used together with DEMO_FILE_BLUEPRINTS) ---
+//
+// Built deterministically from a small set of templates so the seed stays
+// reproducible without needing a per-blueprint hand-rolled entry. Designed
+// to give the dashboard/AI endpoints ~14 days of realistic activity:
+//
+//   * 25% fast cases — filed 1-3 days ago, closed within 24-48h
+//   * 40% normal in-flight — filed 4-10 days ago, mid-chain, mixed status
+//   * 20% slow/at-risk — filed 10-14 days ago, currently stuck or backtracked
+//   * 15% recent intake — filed 0-24h ago, just registered
+//
+// Each blueprint is replayed in chronological step order (oldest first) so
+// the existing seedDemoFiles() pipeline can write it via the same hash-chained
+// appendMovementLog({ timestamp }) seam without modification.
+
+const HISTORICAL_TITLES_W01 = [
+  'Citizenship Certificate Issuance',
+  'Citizenship Certificate Renewal',
+  'Birth Registration Certificate',
+  'Death Registration Certificate',
+  'Marriage Registration Certificate',
+  'Land Ownership Certificate Transfer',
+  'Land Ownership Certificate Update',
+  'Business Registration Application',
+  'Business Registration Renewal',
+  'Tax Clearance Certificate',
+  'Senior Citizen ID Card',
+  'Disability Allowance Application',
+  'Address Verification Letter',
+  'Recommendation Letter Request',
+  'Character Certificate Application',
+];
+
+const HISTORICAL_TITLES_W02 = [
+  'Citizenship Certificate Issuance',
+  'Citizenship Certificate Correction',
+  'Birth Registration Certificate',
+  'Marriage Registration Certificate',
+  'Land Ownership Certificate Transfer',
+  'Business Registration Application',
+  'Tax Clearance Certificate',
+  'Senior Citizen ID Card Renewal',
+  'Disability Allowance Renewal',
+  'Address Verification Letter',
+  'Recommendation Letter Request',
+  'Character Certificate Application',
+  'House Registration Certificate',
+  'Water Connection Application',
+  'Electricity Connection Request',
+];
+
+const HISTORICAL_CITIZEN_NAMES = [
+  'Krishna Bahadur Tamang', 'Sita Devi Sharma', 'Ramesh Adhikari', 'Laxmi Kumari Thapa',
+  'Bishnu Prasad Dahal', 'Anita Rana Magar', 'Prakash KC', 'Sunita Devi Gurung',
+  'Hari Bahadur Karki', 'Gita Kumari Shrestha', 'Dinesh Lama', 'Sabina Tamang',
+  'Raju Pandey', 'Manju Devi Joshi', 'Tek Bahadur Bhandari', 'Radha Kumari Yadav',
+  'Suman Shrestha', 'Asha Limbu', 'Bikram Singh Thakuri', 'Puja Devi Pant',
+  'Mahesh Raj Bista', 'Sarita Khadka', 'Niranjan Pradhan', 'Deepa Subedi',
+  'Arjun Chaudhary', 'Nirmala Devi Acharya', 'Kamal Khatri', 'Rekha Shah',
+  'Suresh Manandhar', 'Gehendra Bohora', 'Yamuna Kafle', 'Tanka Ghimire',
+  'Bharat Sapkota', 'Mira Aryal', 'Lal Bahadur Rokka', 'Susma Baral',
+  'Kiran Pun', 'Sarmila Adhikari', 'Dipak Bhattarai', 'Hemanta Karki',
+  'Yam Bahadur Rana', 'Rita Kumari Chaudhary', 'Madan Shahi', 'Sushila Bhandari',
+  'Govinda Khanal', 'Parbati Regmi', 'Shyam Krishna Joshi', 'Ambika Timilsina',
+  'Purna Bahadur Magar', 'Kamala Wagle', 'Chhabilal Bhusal', 'Devi Kumari Oli',
+  'Rudra Bahadur Khadka', 'Sharada Pokhrel', 'Meghraj Bhatta', 'Lalita KC',
+  'Tirtha Raj Ojha', 'Nandani Devi', 'Santosh Humagain', 'Bhawana Kandel',
+  'Manoj Giri', 'Sabitra Bhandari', 'Yam Prasad Rijal', 'Anju Chaudhary',
+  'Dipendra Raut', 'Rama Devi Lamsal', 'Bhola Shrestha', 'Geeta Pandey',
+  'Shiva Lal Mahato', 'Sumitra BK', 'Rambaran Yadav', 'Parbati Acharya',
+  'Gyan Bahadur Newar', 'Sushma Khadayat', 'Lila Karki', 'Rupa Thapa',
+  'Netra Bahadur Basnet', 'Shanti Mahara', 'Bhuwan Chaudhary', 'Sushila Devi Yadav',
+  'Ram Krishna Adhikari', 'Bhagwati Ghimire', 'Nanda Lal Joshi', 'Tara Devi Wagle',
+  'Dhan Bahadur Rawat', 'Goma Kumari Budha', 'Lokendra BK', 'Sita Thapa Magar',
+  'Jaya Ram Karki', 'Radhika Hamal', 'Birendra Chaudhary', 'Ganga Devi Subedi',
+  'Shyam Sundar Sharma', 'Lila Maya Tamang', 'Hira Lal Acharya', 'Pabitra Devi Kafle',
+];
+
+const W01_OFFICER_BY_LOCATION = {
+  'Reception': 'officer@ward.gov.np',
+  'Verification Desk': 'verification.w01@ward.gov.np',
+  'Tax Office Desk': 'tax.w01@ward.gov.np',
+  'Ward Chair Section': 'wardchair.w01@ward.gov.np',
+  'Admin Office': 'admin@ward.gov.np',
+};
+
+const W02_OFFICER_BY_LOCATION = {
+  'Baneshwor Reception': 'reception.w02@ward.gov.np',
+  'Baneshwor Verification Desk': 'verification.w02@ward.gov.np',
+  'Baneshwor Ward Chair Section': 'admin.w02@ward.gov.np',
+  // Tax and Archives desks in W02 share admin.w02 — there's no dedicated
+  // demo officer for those desks, but the production system has them.
+  // Routing through admin keeps the chain valid and shows cross-desk
+  // activity in the bottleneck/queue analytics.
+  'Baneshwor Tax Office Desk': 'admin.w02@ward.gov.np',
+  'Baneshwor Administrative Archives': 'admin.w02@ward.gov.np',
+};
+
+const HISTORICAL_RECEIVING_LOCATION_W01 = 'Reception';
+const HISTORICAL_RECEIVING_LOCATION_W02 = 'Baneshwor Reception';
+const HISTORICAL_PRIORITY_RATE = 0.10;
+const HISTORICAL_BACKTRACK_RATE = 0.12;
+const HISTORICAL_TOTAL = 98;
+
+function pickFrom(arr, i) {
+  return arr[i % arr.length];
+}
+
+function officeHourShift(stepIndex) {
+  // Deterministic intra-day offset (in minutes) to spread step timestamps
+  // across plausible office hours. Cycle avoids the noon lull, biases a
+  // touch toward morning, and gives every blueprint its own shape.
+  const cycles = [9 * 60 + 12, 10 * 60 + 45, 14 * 60 + 20, 11 * 60 + 5, 15 * 60 + 50];
+  return cycles[stepIndex % cycles.length];
+}
+
+function buildHistoricalStepChain(template, filedHoursAgo, blueprintIndex) {
+  // Returns an array of step objects oldest-first, ready to feed into
+  // seedDemoFiles(). Step chains follow realistic municipal flows:
+  //   fast    -> Received -> Under Review -> Approved
+  //   normal  -> Received -> Pending -> Under Review -> Pending -> Verified
+  //   slow    -> Received -> Pending -> Backtracked -> Pending -> Under Review
+  //   recent  -> Received only
+  //
+  // Location keys are ward-prefixed (Baneshwor for W02, plain for W01) so the
+  // officer-lookup map matches the production desk names exactly.
+  const isW02 = template.wardCode === 'W02';
+  const VERIF = isW02 ? 'Baneshwor Verification Desk' : 'Verification Desk';
+  const TAX = isW02 ? 'Baneshwor Tax Office Desk' : 'Tax Office Desk';
+  const CHAIR = isW02 ? 'Baneshwor Ward Chair Section' : 'Ward Chair Section';
+  const ARC = isW02 ? 'Baneshwor Administrative Archives' : 'Administrative Archives';
+  const recv = template.receivingLocation;
+
+  const filedTime = new Date(Date.now() - filedHoursAgo * 60 * 60 * 1000);
+  const lastStepMinutes = officeHourShift(blueprintIndex + 2);
+
+  const chains = {
+    fast: (officerMap) => [
+      { location: recv, actionType: FILE_STATUSES.RECEIVED,
+        officerEmail: officerMap[recv],
+        notes: `File registered: ${template.title}`,
+        minutesOfDay: officeHourShift(blueprintIndex) },
+      { location: VERIF, actionType: FILE_STATUSES.PENDING,
+        officerEmail: officerMap[VERIF],
+        notes: 'Forwarded for document verification',
+        minutesOfDay: officeHourShift(blueprintIndex + 1) },
+      { location: CHAIR, actionType: FILE_STATUSES.APPROVED,
+        officerEmail: officerMap[CHAIR],
+        notes: 'Approved and endorsed by ward chair', isFinal: true,
+        minutesOfDay: lastStepMinutes },
+    ],
+    normal: (officerMap) => [
+      { location: recv, actionType: FILE_STATUSES.RECEIVED,
+        officerEmail: officerMap[recv],
+        notes: `File registered: ${template.title}`,
+        minutesOfDay: officeHourShift(blueprintIndex) },
+      { location: VERIF, actionType: FILE_STATUSES.PENDING,
+        officerEmail: officerMap[VERIF],
+        notes: 'Forwarded for document verification',
+        minutesOfDay: officeHourShift(blueprintIndex + 1) },
+      { location: VERIF, actionType: FILE_STATUSES.UNDER_REVIEW,
+        officerEmail: officerMap[VERIF],
+        notes: 'Documents under review',
+        minutesOfDay: officeHourShift(blueprintIndex + 2) },
+      { location: TAX, actionType: FILE_STATUSES.PENDING,
+        officerEmail: officerMap[TAX],
+        notes: 'Forwarded for tax clearance review',
+        minutesOfDay: officeHourShift(blueprintIndex + 3) },
+      { location: CHAIR, actionType: FILE_STATUSES.UNDER_REVIEW,
+        officerEmail: officerMap[CHAIR],
+        notes: 'Awaiting final endorsement',
+        minutesOfDay: lastStepMinutes },
+    ],
+    slow: (officerMap) => [
+      { location: recv, actionType: FILE_STATUSES.RECEIVED,
+        officerEmail: officerMap[recv],
+        notes: `File registered: ${template.title}`,
+        minutesOfDay: officeHourShift(blueprintIndex) },
+      { location: VERIF, actionType: FILE_STATUSES.PENDING,
+        officerEmail: officerMap[VERIF],
+        notes: 'Forwarded for document verification',
+        minutesOfDay: officeHourShift(blueprintIndex + 1) },
+      { location: recv, actionType: FILE_STATUSES.BACKTRACKED,
+        officerEmail: officerMap[VERIF],
+        notes: 'Backtracked: missing recommendation letter and citizenship copy',
+        backtrackReason: 'Missing recommendation letter and citizenship copy',
+        isBacktrack: true,
+        minutesOfDay: officeHourShift(blueprintIndex + 2) },
+      { location: VERIF, actionType: FILE_STATUSES.PENDING,
+        officerEmail: officerMap[VERIF],
+        notes: 'Re-submitted and forwarded for tax clearance',
+        minutesOfDay: officeHourShift(blueprintIndex + 3) },
+      { location: VERIF, actionType: FILE_STATUSES.UNDER_REVIEW,
+        officerEmail: officerMap[VERIF],
+        notes: 'Stuck in verification — awaiting citizen follow-up',
+        minutesOfDay: lastStepMinutes },
+    ],
+    recent: (officerMap) => [
+      { location: recv, actionType: FILE_STATUSES.RECEIVED,
+        officerEmail: officerMap[recv],
+        notes: `File registered: ${template.title}`,
+        minutesOfDay: officeHourShift(blueprintIndex) },
+    ],
+  };
+
+  const factory = chains[template.kind];
+  if (!factory) throw new Error(`Unknown historical template kind: ${template.kind}`);
+
+  const officerMap = template.wardCode === 'W01' ? W01_OFFICER_BY_LOCATION : W02_OFFICER_BY_LOCATION;
+  const rawSteps = factory(officerMap);
+
+  // Convert each raw step into a { hoursAgo, actionType, ... } object.
+  // hoursAgo is derived from filedHoursAgo plus intra-day minute offsets
+  // so timestamps fall inside working hours rather than at exact-hours marks.
+  return rawSteps.map((step, idx) => ({
+    hoursAgo: Math.max(0.25, filedHoursAgo - (lastStepMinutes - step.minutesOfDay) / 60 - (idx * 0.05)),
+    actionType: step.actionType,
+    location: step.location,
+    officerEmail: step.officerEmail,
+    notes: step.notes,
+    backtrackReason: step.backtrackReason,
+    isBacktrack: step.isBacktrack,
+    isFinal: step.isFinal,
+  }));
+}
+
+function buildHistoricalBlueprints() {
+  // Distribute 98 blueprints across the 4 categories and 2 wards.
+  // Index modulo drives category: 0..24 fast, 25..64 normal,
+  // 65..84 slow, 85..97 recent. Ward flips by index parity.
+  const blueprints = [];
+  const fastCount = Math.round(HISTORICAL_TOTAL * 0.25);     // 25
+  const normalCount = Math.round(HISTORICAL_TOTAL * 0.40);   // 39
+  const slowCount = Math.round(HISTORICAL_TOTAL * 0.20);     // 20
+  const recentCount = HISTORICAL_TOTAL - fastCount - normalCount - slowCount; // 14
+
+  const categoryFor = (i) => {
+    if (i < fastCount) return { kind: 'fast', filedHoursAgo: 24 + (i * 1.5) };   // 1-3 days
+    if (i < fastCount + normalCount) {
+      const j = i - fastCount;
+      return { kind: 'normal', filedHoursAgo: 96 + (j * 4.5) };                    // 4-10 days
+    }
+    if (i < fastCount + normalCount + slowCount) {
+      const j = i - fastCount - normalCount;
+      return { kind: 'slow', filedHoursAgo: 240 + (j * 3.5) };                     // 10-14 days
+    }
+    const j = i - fastCount - normalCount - slowCount;
+    return { kind: 'recent', filedHoursAgo: 0.5 + (j * 1.4) };                    // 0-24h
+  };
+
+  for (let i = 0; i < HISTORICAL_TOTAL; i++) {
+    const wardCode = i % 2 === 0 ? 'W01' : 'W02';
+    const titles = wardCode === 'W01' ? HISTORICAL_TITLES_W01 : HISTORICAL_TITLES_W02;
+    const title = pickFrom(titles, Math.floor(i / 2) + (wardCode === 'W02' ? 3 : 0));
+    const cat = categoryFor(i);
+
+    const template = {
+      wardCode,
+      title,
+      kind: cat.kind,
+      receivingLocation: wardCode === 'W01'
+        ? HISTORICAL_RECEIVING_LOCATION_W01
+        : HISTORICAL_RECEIVING_LOCATION_W02,
+    };
+
+    const steps = buildHistoricalStepChain(template, cat.filedHoursAgo, i);
+
+    blueprints.push({
+      wardCode,
+      title,
+      citizenName: pickFrom(HISTORICAL_CITIZEN_NAMES, i),
+      citizenPhone: String(9800000100 + i).padStart(10, '0'),
+      documentType: title.includes('Citizenship') ? 'Citizenship Certificate'
+        : title.includes('Birth') ? 'Birth Registration'
+        : title.includes('Marriage') ? 'Marriage Registration'
+        : title.includes('Death') ? 'Death Registration'
+        : title.includes('Land') ? 'Land Ownership Certificate'
+        : title.includes('Business') ? 'Business Registration'
+        : title.includes('Tax') ? 'Tax Clearance'
+        : title.includes('Senior Citizen') ? 'Senior Citizen ID'
+        : title.includes('Disability') ? 'Disability Allowance'
+        : title.includes('Water') ? 'Water Connection'
+        : title.includes('Electricity') ? 'Electricity Connection'
+        : 'General Service',
+      requiredDocuments: title.includes('Tax')
+        ? ['Tax Receipt', 'Citizenship Certificate Copy', 'Application Form']
+        : title.includes('Land')
+          ? ['Land Ownership Certificate', 'Tax Clearance Certificate', 'Citizenship Certificate Copy']
+          : title.includes('Business')
+            ? ['Application Form', 'Tax Clearance Certificate', 'Recommendation Letter']
+            : ['Application Form', 'Citizenship Certificate Copy', 'Recommendation Letter'],
+      steps,
+      priority: ((i * 7 + 3) % 10) < HISTORICAL_PRIORITY_RATE * 10 ? ((i % 2) + 1) : 0,
+    });
+  }
+
+  return blueprints;
+}
+
+const DEMO_FILE_BLUEPRINTS_HISTORICAL = buildHistoricalBlueprints();
+
 function hoursAgo(hours) {
   return new Date(Date.now() - hours * 60 * 60 * 1000);
 }
@@ -343,7 +654,9 @@ async function seedDemoExtras() {
 async function seedDemoFiles(officersByEmail) {
   console.log('Seeder: Seeding demo files and movement history...');
 
-  for (const blueprint of DEMO_FILE_BLUEPRINTS) {
+  const allBlueprints = [...DEMO_FILE_BLUEPRINTS, ...DEMO_FILE_BLUEPRINTS_HISTORICAL];
+
+  for (const blueprint of allBlueprints) {
     const existing = await File.findOne({ citizenPhone: blueprint.citizenPhone, title: blueprint.title }).lean();
     if (existing) {
       console.log(`Seeder: Demo file skipped (already exists): ${blueprint.title} (${blueprint.citizenPhone})`);
@@ -396,6 +709,7 @@ async function seedDemoFiles(officersByEmail) {
       qrPayload: payload,
       qrDataUrl: dataUrl,
       requiredDocuments: blueprint.requiredDocuments,
+      priority: Number.isInteger(blueprint.priority) ? blueprint.priority : 0,
     });
     file.createdAt = firstStepTime;
     file.updatedAt = firstStepTime;
@@ -478,14 +792,53 @@ async function resetDemoData() {
 
   const fileResult = await File.deleteMany({ _id: { $in: demoFileIds } });
 
+  // SmsLog is not read by any analytics endpoint, but cleanup keeps the
+  // demo dataset tidy. Targeted via the demo phone pattern instead of fileId
+  // in case the ledger was blown away first.
+  const smsResult = await SmsLog.deleteMany({ citizenPhone: DEMO_PHONE_PATTERN });
+
   console.log(
-    `Seeder: Reset removed ${fileResult.deletedCount} demo file(s) and ${historyResult.deletedCount} ledger entr${historyResult.deletedCount === 1 ? 'y' : 'ies'}.`
+    `Seeder: Reset removed ${fileResult.deletedCount} demo file(s), ${historyResult.deletedCount} ledger entr${historyResult.deletedCount === 1 ? 'y' : 'ies'}, and ${smsResult.deletedCount} SMS log(s).`
   );
+}
+
+/**
+ * Logs a quick distribution summary so we can eyeball the seed without
+ * extra queries. Pulls counts from the live DB, scoped to the demo phone
+ * range so it reflects only what this script produced.
+ */
+async function logSeedSummary() {
+  const demoFiles = await File.find({ citizenPhone: DEMO_PHONE_PATTERN }).select('currentStatus wardCode currentLocation').lean();
+  const demoFileIds = demoFiles.map((f) => f._id);
+  const totalLedger = await mongoose.connection.db
+    .collection('movementhistories')
+    .countDocuments({ fileId: { $in: demoFileIds } });
+
+  const byStatus = demoFiles.reduce((acc, f) => {
+    acc[f.currentStatus] = (acc[f.currentStatus] || 0) + 1;
+    return acc;
+  }, {});
+  const byWard = demoFiles.reduce((acc, f) => {
+    acc[f.wardCode] = (acc[f.wardCode] || 0) + 1;
+    return acc;
+  }, {});
+  const byLocation = demoFiles.reduce((acc, f) => {
+    acc[f.currentLocation] = (acc[f.currentLocation] || 0) + 1;
+    return acc;
+  }, {});
+
+  console.log('\n--- Seeded Demo Dataset Summary ---');
+  console.log(`Total demo files:        ${demoFiles.length}`);
+  console.log(`Total ledger entries:    ${totalLedger}`);
+  console.log(`By ward:                 ${Object.entries(byWard).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+  console.log(`By status:               ${Object.entries(byStatus).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+  console.log(`By current location:     ${Object.entries(byLocation).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+  console.log('-----------------------------------\n');
 }
 
 async function seedDatabase() {
   const args = process.argv.slice(2);
-  const withDemoData = args.includes('--demo');
+  const withDemoData = args.includes('--no-demo') ? false : true;
   const shouldReset = args.includes('--reset');
 
   console.log('Seeder: Initializing database seeding operations...');
@@ -508,18 +861,24 @@ async function seedDatabase() {
       const officersByEmail = officerDocs.reduce((acc, u) => ({ ...acc, [u.email]: u }), {});
 
       await seedDemoFiles(officersByEmail);
+      await logSeedSummary();
     }
 
     console.log('Seeder: Database seeding operations completed successfully.');
   } catch (err) {
     console.error(`Seeder: Error during execution: ${err.message}`);
   } finally {
-    // Terminate Mongoose connection gracefully
-    await disconnectDatabase();
+    if (process.argv[1]?.endsWith('seed.js')) {
+      await disconnectDatabase();
+    }
   }
 }
 
-seedDatabase().catch((err) => {
-  console.error('Seeder: Critical failure encountered:', err);
-  process.exit(1);
-});
+if (process.argv[1]?.endsWith('seed.js')) {
+  seedDatabase().catch((err) => {
+    console.error('Seeder: Critical failure encountered:', err);
+    process.exit(1);
+  });
+}
+
+export { seedDatabase };

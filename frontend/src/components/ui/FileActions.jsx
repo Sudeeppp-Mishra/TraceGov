@@ -234,6 +234,39 @@ export function FileActions({
     );
   }
 
+  const isWardChair = currentUser?.role === 'ward_chair';
+
+  if (isWardChair) {
+    return (
+      <Card className="space-y-4">
+        <div className="flex items-center gap-3 rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 text-xs text-blue-900 dark:text-blue-200">
+          <Icons.Shield className="h-5 w-5 text-blue-600 shrink-0" />
+          <div>
+            <strong className="font-bold text-sm block">Ward Chair Inspection View</strong>
+            <span>Read-only inspection mode. All file details, OCR scans, ledger movements, and AI bottleneck predictions are visible below. Routing actions are disabled.</span>
+          </div>
+        </div>
+
+        {hasMissingDocs && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 space-y-2">
+            <p className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+              <Icons.AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+              Missing Required Document(s) ({missingDocs.length})
+            </p>
+            <ul className="flex flex-wrap gap-1.5">
+              {missingDocs.map((doc) => (
+                <li key={doc} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 px-2 py-0.5 text-xs font-medium text-amber-950 dark:text-amber-100">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
+                  {doc}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Card>
+    );
+  }
+
   return (
     <Card className="space-y-5">
       {/* Verification Status Banner */}

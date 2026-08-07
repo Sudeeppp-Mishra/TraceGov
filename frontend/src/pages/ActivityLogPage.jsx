@@ -40,13 +40,13 @@ export default function ActivityLogPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
 
-  const isAdmin = currentUser?.role === 'admin';
+  const isAdminOrWardChair = currentUser?.role === 'admin' || currentUser?.role === 'ward_chair';
 
   useEffect(() => {
     const user = getStoredUser();
     if (!user) { navigate('/login'); return; }
     setCurrentUser(user);
-    if (user.role === 'admin') {
+    if (user.role === 'admin' || user.role === 'ward_chair') {
       api.getOfficers()
         .then((list) => setOfficers((list || []).filter((o) => o.wardCode === user.wardCode)))
         .catch(() => {});
@@ -92,15 +92,15 @@ export default function ActivityLogPage() {
       <Container size="wide" className="space-y-6 pt-8">
         <PageHeading
           breadcrumbs={['Workspace', 'Activity']}
-          title={isAdmin ? 'Ward activity log' : 'My activity'}
-          description={isAdmin
-            ? 'Every movement recorded in the ward ledger — filter by officer to review individual work.'
+          title={isAdminOrWardChair ? 'Ward activity log' : 'My activity'}
+          description={isAdminOrWardChair
+            ? 'Every movement recorded in the ward ledger — inspect actions taken across all desks.'
             : 'Every file action you have performed, newest first. This is your personal audit trail.'}
         />
 
         <Card className="p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            {isAdmin && (
+            {isAdminOrWardChair && (
               <div className="w-full sm:max-w-xs">
                 <Select label="Officer" id="flt_officer" value={officerFilter} onChange={changeFilter(setOfficerFilter)}>
                   <option value="">All officers</option>

@@ -48,7 +48,7 @@ export default function App() {
         <Route
           path="/officer"
           element={
-            <ProtectedRoute roles={['officer', 'admin']}>
+            <ProtectedRoute roles={['officer', 'admin', 'ward_chair']}>
               <OfficerDashboard />
             </ProtectedRoute>
           }
@@ -72,7 +72,7 @@ export default function App() {
         <Route
           path="/ai"
           element={
-            <ProtectedRoute roles={['officer', 'admin']}>
+            <ProtectedRoute roles={['officer', 'admin', 'ward_chair']}>
               <AIInsightsDashboard />
             </ProtectedRoute>
           }
@@ -80,7 +80,7 @@ export default function App() {
         <Route
           path="/activity"
           element={
-            <ProtectedRoute roles={['officer', 'admin']}>
+            <ProtectedRoute roles={['officer', 'admin', 'ward_chair']}>
               <ActivityLogPage />
             </ProtectedRoute>
           }

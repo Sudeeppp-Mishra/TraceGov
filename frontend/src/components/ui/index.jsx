@@ -758,6 +758,7 @@ export const Icons = {
   Search: mk(<path d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />),
   Scan: mk(<><path d="M4 7V5a1 1 0 011-1h2M4 17v2a1 1 0 001 1h2m10-16h2a1 1 0 011 1v2m-3 13h2a1 1 0 001-1v-2M7 12h10" /></>),
   Clock: mk(<><path d="M12 7v5l3 2" /><circle cx="12" cy="12" r="9" /></>),
+  CalendarClock: mk(<><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 11h5M16 14a4 4 0 100 4" /><path d="M16 16v1.5l1 1" /></>),
   User: mk(<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0116 0" /></>),
   Users: mk(<><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0113 0M16 5.5a3.5 3.5 0 010 7M15 20a6.5 6.5 0 016.5-6.5" /></>),
   ArrowRight: mk(<path d="M5 12h14m-6-7l7 7-7 7" />),
@@ -802,6 +803,8 @@ export const Icons = {
   RefreshCw: mk(<path d="M20 11A8.1 8.1 0 004.5 9M4 5v4h4m-4 6a8.1 8.1 0 0015.5 2m.5 4v-4h-4" />),
   Upload: mk(<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />),
   Undo: mk(<path d="M3 7v6h6M3 13a9 9 0 0118 0 9 9 0 01-9 9 9 9 0 01-7.7-4.4" />),
+  Copy: mk(<><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></>),
+  HelpCircle: mk(<><circle cx="12" cy="12" r="9" /><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3M12 17h.01" /></>),
 };
 
 export { QrScanner } from './QrScanner';
@@ -809,3 +812,4 @@ export { FileActions } from './FileActions';
 export { ExtractedTextModal } from './ExtractedTextModal';
 export { StampOverlayImage } from './StampOverlayImage';
 export { ScanReviewModal } from './ScanReviewModal';
+export { EditFileModal } from './EditFileModal';

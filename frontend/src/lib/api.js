@@ -61,10 +61,17 @@ export const api = {
 
   getOfficers: () => request('/auth/officers'),
 
+  updateOfficer: (id, payload) =>
+    request(`/auth/officers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
   deleteOfficer: (id) =>
     request(`/auth/officers/${id}`, {
       method: 'DELETE',
     }),
+
 
   // --- Files API ---
   registerFile: (payload) =>

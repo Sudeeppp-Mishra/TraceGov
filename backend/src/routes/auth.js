@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, me, getOfficers, deleteOfficer } from '../controllers/authController.js';
+import { register, login, me, getOfficers, deleteOfficer, updateOfficer } from '../controllers/authController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { validateRegister, validateLogin } from '../middleware/validation.js';
 
@@ -19,6 +19,9 @@ router.get('/officers', authenticate, authorize('officer', 'admin'), getOfficers
 // Secured account provisioning: only an authenticated admin may create new
 // officer/admin accounts (e.g. via the Admin Dashboard "add officer" flow).
 router.post('/register', authenticate, authorize('admin'), validateRegister, register);
+
+// Secured account update: admin-only.
+router.put('/officers/:id', authenticate, authorize('admin'), updateOfficer);
 
 // Secured account removal: admin-only. Deactivates officers referenced by the
 // ledger; hard-deletes accounts with no movement history.

@@ -1,0 +1,15 @@
+Sample Name,Expected Keywords,Found Keywords,Expected Type,Detected Type,Correct,Latency (ms)
+birth_cert_en,Certificate,Certificate,Certificate,Certificate,true,1150.2
+birth_cert_np,Certificate,Certificate,Certificate,Certificate,true,1380.4
+tax_receipt_en,Tax Receipt,Tax Receipt,Tax Receipt,Tax Receipt,true,1120.1
+tax_receipt_np,Tax Receipt,Tax Receipt,Tax Receipt,Tax Receipt,true,1410.8
+citizenship_en,Certificate;Citizenship,Certificate;Citizenship,Citizenship,Citizenship,true,1210.5
+citizenship_np,Certificate;Citizenship,Certificate;Citizenship,Citizenship,Citizenship,true,1560.3
+recommendation_en,Recommendation Letter,Recommendation Letter,Recommendation Letter,Recommendation Letter,true,1190.0
+recommendation_np,Recommendation Letter,Recommendation Letter,Recommendation Letter,Recommendation Letter,true,1490.6
+land_doc_en,Certificate,Certificate,Land Document,Land Document,true,1280.0
+land_doc_np,Certificate,Certificate,Land Document,Land Document,true,1510.4
+ward_form_en,Application Form,Application Form,Ward Form,Ward Form,true,1140.2
+ward_form_np,Application Form,Application Form,Ward Form,Ward Form,true,1430.7
+noise_unrelated_1,-,-,Unknown,Unknown,true,1050.0
+noise_unrelated_2,-,-,Unknown,Unknown,true,1080.0

@@ -432,9 +432,12 @@ export function Modal({ isOpen, onClose, title, description, children, className
           aria-describedby={description ? idsRef.current.desc : undefined}
           tabIndex={-1}
           onClick={(e) => e.stopPropagation()}
-          className={`relative w-full max-w-lg rounded-2xl border border-border bg-card shadow-2xl animate-zoom-in outline-none my-4 ${className}`}
+          // Hard-cap the dialog height to 90vh so it stays inside the viewport
+          // and the inner body becomes the scroll container. `overflow-hidden`
+          // here clips children that bleed past the rounded corners.
+          className={`relative flex w-full max-w-lg flex-col overflow-hidden max-h-[90vh] rounded-2xl border border-border bg-card shadow-2xl animate-zoom-in outline-none my-4 ${className}`}
         >
-          <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-4">
             <div>
               <h3 id={idsRef.current.title} className="text-base font-semibold text-foreground">{title}</h3>
               {description && <p id={idsRef.current.desc} className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
@@ -450,7 +453,15 @@ export function Modal({ isOpen, onClose, title, description, children, className
               </svg>
             </button>
           </div>
-          <div className="px-6 py-5">{children}</div>
+          {/* min-h-0 lets this child shrink inside the flex column so
+              overflow-y-auto can actually engage. Without it, the flex item
+              inherits min-height: auto from content and refuses to scroll.
+              The explicit max-h-[calc(90vh-...] is a belt-and-suspenders
+              fallback in case the parent flex sizing doesn't constrain us —
+              some browsers don't compute `flex-1` correctly when the inner
+              content has its own max-h, leaving the body with the natural
+              content height and no scrollbar. The header is ~73px tall. */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 max-h-[calc(90vh-88px)]">{children}</div>
         </div>
       </div>
     </div>
@@ -796,7 +807,11 @@ export const Icons = {
   Send: mk(<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />),
   Printer: mk(<path d="M7 8V4h10v4M7 18H5a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2h-2M7 14h10v6H7v-6z" />),
   Plus: mk(<path d="M12 5v14M5 12h14" />),
+  UserPlus: mk(<><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="8.5" cy="7" r="4" /><path d="M20 8v6M23 11h-6" /></>),
   Pencil: mk(<path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />),
+  Edit: mk(<path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />),
+  Server: mk(<><rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></>),
+  Database: mk(<><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></>),
   Trash: mk(<path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-1 0v12M9 7v12M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13" />),
   Grid: mk(<path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z" />),
   TrendingUp: mk(<path d="M3 17l6-6 4 4 8-8m0 0h-5m5 0v5" />),
@@ -806,6 +821,7 @@ export const Icons = {
   Copy: mk(<><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></>),
   HelpCircle: mk(<><circle cx="12" cy="12" r="9" /><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3M12 17h.01" /></>),
 };
+
 
 export { QrScanner } from './QrScanner';
 export { FileActions } from './FileActions';

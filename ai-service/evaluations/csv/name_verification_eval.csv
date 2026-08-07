@@ -1,0 +1,16 @@
+English Name,Nepali Name,Test Type,Ground Truth,Predicted Found,Match Type,Confidence,Latency (ms)
+Aarav Sharma,आरव शर्मा,exact,true,true,exact,0.98,1.2
+Aarav Sharma,आरव शर्मा,exact_nepali,true,true,exact,0.97,1.5
+Aarav Sharma,-,fuzzy_typo,true,true,fuzzy,0.88,4.1
+-,आरव शर्मा,devanagari_skeleton,true,true,devanagari,0.90,3.8
+Sita Kumari Shrestha,सीता कुमारी श्रेष्ठ,exact,true,true,exact,0.98,1.1
+Sita Kumari Shrestha,-,fuzzy_typo,true,true,fuzzy,0.85,4.5
+-,सीता कुमारी श्रेष्ठ,exact_nepali,true,true,exact,0.97,1.4
+Ramesh Bahadur Thapa,रमेश बहादुर थापा,exact,true,true,exact,0.98,1.3
+Ramesh Bahadur Thapa,-,fuzzy_typo,true,true,fuzzy,0.86,4.2
+-,रमेश बहादुर थापा,devanagari_skeleton,true,true,devanagari,0.90,3.9
+Aarav Sharma,आरव शर्मा,mismatch,false,false,not_found,0.00,2.1
+Sita Kumari Shrestha,सीता कुमारी श्रेष्ठ,no_name_in_doc,false,false,not_found,0.00,2.3
+Ramesh Bahadur Thapa,रमेश बहादुर थापा,no_name_in_doc,false,false,not_found,0.00,2.0
+Sita Kumari Shrestha,-,mismatch,false,false,not_found,0.00,2.4
+-,रमेश बहादुर थापा,mismatch,false,false,not_found,0.00,2.6

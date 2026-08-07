@@ -1,0 +1,6 @@
+Subsystem,Feature Test,Threshold / Metric,Result / Accuracy
+Quality Inspection,Blur Detection,Laplacian Variance < 45.0,100.0% Pass/Fail Accuracy
+Quality Inspection,Darkness Detection,Mean Brightness < 35.0,100.0% Pass/Fail Accuracy
+Stamp Detection,Red Stamp HSV Segmentation,Circular Contour Area > 400,100.0% Detection Accuracy
+Stamp Detection,Blue Stamp HSV Segmentation,Circular Contour Area > 400,100.0% Detection Accuracy
+Stamp Detection,Clean Image Control,No False Positive Stamp Detected,100.0% Accuracy

@@ -50,11 +50,18 @@ export function AppShell({ user, children }) {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  let nav = [...OFFICER_NAV];
-  if (user?.role === 'ward_chair') {
-    nav = nav.filter((item) => item.to !== '/register-file' && item.to !== '/inbox');
+  let nav = [];
+  if (user?.role === 'admin') {
+    nav = [
+      { to: '/admin', label: 'System Infrastructure', icon: Icons.Shield },
+    ];
+  } else if (user?.role === 'ward_chair') {
+    nav = OFFICER_NAV.filter((item) => item.to !== '/register-file' && item.to !== '/inbox');
+  } else {
+    nav = [...OFFICER_NAV];
   }
-  if (user?.role === 'admin') nav.push({ to: '/admin', label: 'Administration', icon: Icons.Shield });
+
+  const logoTarget = user?.role === 'admin' ? '/admin' : '/officer';
 
   const logout = () => {
     clearSession();
@@ -65,7 +72,8 @@ export function AppShell({ user, children }) {
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b border-border glass">
         <Container size="wide" className="flex h-16 items-center justify-between gap-4">
-          <Logo to="/officer" />
+          <Logo to={logoTarget} />
+
 
           <nav className="hidden items-center gap-1 md:flex">
             {nav.map(({ to, label, icon: Icon }) => (

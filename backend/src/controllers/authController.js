@@ -163,3 +163,45 @@ export async function deleteOfficer(req, res, next) {
     next(err);
   }
 }
+
+/**
+ * Update an officer account details (Admin only).
+ */
+export async function updateOfficer(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { name, email, deskLocation } = req.body;
+
+    const officer = await User.findOne({ _id: id, wardCode: req.user.wardCode });
+    if (!officer) {
+      return res.status(404).json({ success: false, error: 'Officer not found' });
+    }
+
+    if (name && name.trim()) officer.name = name.trim();
+    if (email && email.trim()) {
+      const emailLower = email.toLowerCase().trim();
+      const existing = await User.findOne({ email: emailLower, _id: { $ne: id } });
+      if (existing) {
+        return res.status(409).json({ error: 'This email is already in use by another user' });
+      }
+      officer.email = emailLower;
+    }
+    if (deskLocation) officer.deskLocation = deskLocation;
+
+    await officer.save();
+    return res.json({
+      success: true,
+      officer: {
+        id: officer._id,
+        name: officer.name,
+        email: officer.email,
+        role: officer.role,
+        wardCode: officer.wardCode,
+        deskLocation: officer.deskLocation,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+

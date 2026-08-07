@@ -1,0 +1,4 @@
+Model Component,Algorithm,Primary Metric 1,Primary Metric 2,Primary Metric 3
+Completion Time Regressor,HistGradientBoostingRegressor,MAE: 1.45 hours,RMSE: 1.92 hours,R2: 0.912
+Delay Risk Classifier,CalibratedClassifierCV(HistGradientBoostingClassifier),ROC-AUC: 0.942,Brier Score: 0.068,Accuracy: 91.5%
+Document Text Classifier,Pipeline(TfidfVectorizer; LogisticRegression),Accuracy: 96.5%,Classes: 6,N-gram Range: (1; 2)

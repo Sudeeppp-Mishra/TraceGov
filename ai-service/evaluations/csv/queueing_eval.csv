@@ -1,0 +1,4 @@
+Scenario Context,Movements,Est Minutes Remaining,Confidence,Delay Prob (%),Expected Processing Hours,Prediction Source,Latency (ms)
+Freshly registered file (1 movement),1,240,medium,14,4.0,trained_model_synthetic,4.2
+Mid-workflow file (3 movements),3,720,high,48,12.0,trained_model_synthetic,3.8
+Long-running / backtracked file (5+ movements),5,1140,high,78,19.0,trained_model_synthetic,4.5

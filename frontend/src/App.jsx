@@ -18,13 +18,17 @@ const ActivityLogPage = lazy(() => import('./pages/ActivityLogPage'));
 function ProtectedRoute({ children, roles }) {
   const user = getStoredUser();
   if (!user) return <Navigate to="/login" replace />;
-  if (roles && !roles.includes(user.role)) return <Navigate to="/officer" replace />;
+  if (roles && !roles.includes(user.role)) {
+    return <Navigate to={user.role === 'admin' ? '/admin' : '/officer'} replace />;
+  }
   return children;
 }
 
 /** Unknown URLs: staff go back to their workspace, visitors to the landing page. */
 function CatchAllRedirect() {
-  return <Navigate to={getStoredUser() ? '/officer' : '/'} replace />;
+  const user = getStoredUser();
+  if (!user) return <Navigate to="/" replace />;
+  return <Navigate to={user.role === 'admin' ? '/admin' : '/officer'} replace />;
 }
 
 export default function App() {
@@ -48,7 +52,7 @@ export default function App() {
         <Route
           path="/officer"
           element={
-            <ProtectedRoute roles={['officer', 'admin', 'ward_chair']}>
+            <ProtectedRoute roles={['officer', 'ward_chair']}>
               <OfficerDashboard />
             </ProtectedRoute>
           }
@@ -56,7 +60,7 @@ export default function App() {
         <Route
           path="/inbox"
           element={
-            <ProtectedRoute roles={['officer', 'admin']}>
+            <ProtectedRoute roles={['officer']}>
               <OfficerInbox />
             </ProtectedRoute>
           }
@@ -64,7 +68,7 @@ export default function App() {
         <Route
           path="/register-file"
           element={
-            <ProtectedRoute roles={['officer', 'admin']}>
+            <ProtectedRoute roles={['officer']}>
               <RegisterFilePage />
             </ProtectedRoute>
           }
@@ -72,7 +76,7 @@ export default function App() {
         <Route
           path="/ai"
           element={
-            <ProtectedRoute roles={['officer', 'admin', 'ward_chair']}>
+            <ProtectedRoute roles={['officer', 'ward_chair']}>
               <AIInsightsDashboard />
             </ProtectedRoute>
           }
@@ -80,7 +84,7 @@ export default function App() {
         <Route
           path="/activity"
           element={
-            <ProtectedRoute roles={['officer', 'admin', 'ward_chair']}>
+            <ProtectedRoute roles={['officer', 'ward_chair']}>
               <ActivityLogPage />
             </ProtectedRoute>
           }
@@ -99,3 +103,4 @@ export default function App() {
     </Suspense>
   );
 }
+

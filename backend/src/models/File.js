@@ -143,14 +143,27 @@ const fileSchema = new mongoose.Schema(
         },
 extractedTextPreview: { type: String },
         extractedText: { type: String },
+        // Per-language partitions of `extractedText` so the frontend can
+        // render two labeled blocks ("🇳🇵 Nepali" / "🇬🇧 English") in the
+        // extracted-text modal. Empty strings for single-language docs.
+        nepaliText: { type: String },
+        englishText: { type: String },
         textBoxes: [{
           text: { type: String },
           bbox: { type: [[Number]] },
           confidence: { type: Number },
+          // Per-word script tag from AI service (`ne` / `en` / `mixed` /
+          // `unknown`). Drives the language emoji in ScanReviewModal overlays.
+          language: { type: String, enum: ['ne', 'en', 'mixed', 'unknown'] },
         }],
         imageWidth: { type: Number },
         imageHeight: { type: Number },
         imagePreviews: [{ type: String }],
+        // Tier-3 #17: preprocessed image data URL so the OCR review modal
+        // can render bboxes in their true coordinate space even when the
+        // scan was persisted days ago (bboxes are in preprocessed pixels,
+        // not original-upload pixels). Optional — fall back to imagePreview.
+        preprocessedImageDataUrl: { type: String },
         pages: [{
           pageIndex: { type: Number },
           extractedTextPreview: { type: String },

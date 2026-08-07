@@ -215,11 +215,16 @@ export async function registerFile(req, res, next) {
         status: dv.status || 'unverified',
         extractedTextPreview: dv.extractedTextPreview || null,
         extractedText: dv.extractedText || null,
+        // Per-language partitions from the AI service. Empty strings for
+        // single-language docs; null for old scans pre-dating this feature.
+        nepaliText: typeof dv.nepaliText === 'string' ? dv.nepaliText : null,
+        englishText: typeof dv.englishText === 'string' ? dv.englishText : null,
         // Tier-3 #12: per-word bounding boxes for the side-by-side review modal.
         textBoxes: Array.isArray(dv.textBoxes) ? dv.textBoxes.slice(0, 200).map((tb) => ({
           text: String(tb.text || ''),
           bbox: Array.isArray(tb.bbox) ? tb.bbox.map((p) => [Number(p[0]) || 0, Number(p[1]) || 0]) : [],
           confidence: typeof tb.confidence === 'number' ? tb.confidence : 0,
+          language: ['ne', 'en', 'mixed', 'unknown'].includes(tb.language) ? tb.language : null,
         })) : [],
         imageWidth: typeof dv.imageWidth === 'number' ? dv.imageWidth : 0,
         imageHeight: typeof dv.imageHeight === 'number' ? dv.imageHeight : 0,
@@ -1032,11 +1037,16 @@ export async function resolveMissingDocuments(req, res, next) {
         status: dv.status || 'verified',
         extractedTextPreview: dv.extractedTextPreview || null,
         extractedText: dv.extractedText || null,
+        // Per-language partitions from the AI service. Empty strings for
+        // single-language docs; null for old scans pre-dating this feature.
+        nepaliText: typeof dv.nepaliText === 'string' ? dv.nepaliText : null,
+        englishText: typeof dv.englishText === 'string' ? dv.englishText : null,
         // Tier-3 #12: per-word bounding boxes for the side-by-side review modal.
         textBoxes: Array.isArray(dv.textBoxes) ? dv.textBoxes.slice(0, 200).map((tb) => ({
           text: String(tb.text || ''),
           bbox: Array.isArray(tb.bbox) ? tb.bbox.map((p) => [Number(p[0]) || 0, Number(p[1]) || 0]) : [],
           confidence: typeof tb.confidence === 'number' ? tb.confidence : 0,
+          language: ['ne', 'en', 'mixed', 'unknown'].includes(tb.language) ? tb.language : null,
         })) : [],
         imageWidth: typeof dv.imageWidth === 'number' ? dv.imageWidth : 0,
         imageHeight: typeof dv.imageHeight === 'number' ? dv.imageHeight : 0,
@@ -1506,13 +1516,23 @@ export async function reOcrDocumentVerification(req, res, next) {
       status: missingKeywords.length === 0 ? 'verified' : 'needs_review',
       extractedTextPreview: result.extractedTextPreview || null,
       extractedText: result.extractedText || previous.extractedText || null,
+      // Per-language partitions from the AI service. Falls back to whatever
+      // was previously stored (matches `extractedText` fallback semantics).
+      nepaliText: typeof result.nepaliText === 'string' ? result.nepaliText : (previous.nepaliText || null),
+      englishText: typeof result.englishText === 'string' ? result.englishText : (previous.englishText || null),
       textBoxes: Array.isArray(result.textBoxes) ? result.textBoxes.slice(0, 200).map((tb) => ({
         text: String(tb.text || ''),
         bbox: Array.isArray(tb.bbox) ? tb.bbox.map((p) => [Number(p[0]) || 0, Number(p[1]) || 0]) : [],
         confidence: typeof tb.confidence === 'number' ? tb.confidence : 0,
+        language: ['ne', 'en', 'mixed', 'unknown'].includes(tb.language) ? tb.language : null,
       })) : (previous.textBoxes || []),
       imageWidth: typeof result.imageWidth === 'number' ? result.imageWidth : (previous.imageWidth || 0),
       imageHeight: typeof result.imageHeight === 'number' ? result.imageHeight : (previous.imageHeight || 0),
+      // Tier-3 #17: persist the preprocessed image so the dashboard review
+      // modal can render bboxes correctly for older scans. Capped to 2MB.
+      preprocessedImageDataUrl: typeof result.preprocessedImageDataUrl === 'string'
+        ? result.preprocessedImageDataUrl.slice(0, 2_000_000)
+        : (previous.preprocessedImageDataUrl || null),
       imageQualityIssue: result.imageQualityIssue || previous.imageQualityIssue,
       stampAnalysis: result.stampAnalysis ? sanitizeStampAnalysis(result.stampAnalysis) : previous.stampAnalysis,
     };

@@ -33,13 +33,17 @@ async function callAiService(path, body, timeoutMs = 4000) {
  * the default 4s used for the lightweight prediction endpoints — so this call
  * gets its own generous timeout instead.
  */
-export async function aiAnalyzeDocument({ imageBase64, requiredKeywords, detectedText }) {
+export async function aiAnalyzeDocument({ imageBase64, requiredKeywords, detectedText, citizenName, citizenNameNepali }) {
   // Tier-3 #15: multi-page arrays. Each page costs ~OCR_time so a 5-page
   // document needs a much wider timeout than the single-page 90s default.
   const isArray = Array.isArray(imageBase64);
   const timeoutMs = isArray ? Math.max(90000, (imageBase64.length || 1) * 90000) : 90000;
   try {
-    return await callAiService('/analyze-document', { imageBase64, requiredKeywords, detectedText }, timeoutMs);
+    // citizenName + citizenNameNepali are forwarded to the AI service so
+    // verify_citizen_name() can compare OCR text against the form-entered
+    // names. Dropping them here would cause the OCR panel to fall back to
+    // the "Name not checked on this document" placeholder.
+    return await callAiService('/analyze-document', { imageBase64, requiredKeywords, detectedText, citizenName, citizenNameNepali }, timeoutMs);
   } catch {
     return {
       documentType: 'Unknown',

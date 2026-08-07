@@ -120,44 +120,195 @@ function confidenceTierClass(c) {
   return 'border-red-500 bg-red-500/15';
 }
 
+// Per-word script emoji for overlay tooltips. Tier-3 #16 — when the AI
+// service tagged each word with a language, officers can see at a glance
+// which script each detected word belongs to (e.g. 🇳🇵 on a Devanagari
+// word, 🇬🇧 on a Latin word in the same line).
+function languageFlag(language) {
+  if (language === 'ne') return '🇳🇵';
+  if (language === 'en') return '🇬🇧';
+  if (language === 'mixed') return '🌐';
+  return '';
+}
+
 // Renders the image + bounding-box overlays. Coordinates are normalized to %.
+// Clicking the image opens a fullscreen lightbox with the same overlays
+// rendered at natural pixel size — the small thumbnail boxes are too tiny
+// to read confidence at a glance, so the lightbox lets officers inspect
+// each word's bounding box clearly.
 function TextBoxOverlayImage({ src, textBoxes, imageWidth, imageHeight, alt }) {
   const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 });
+  const [expanded, setExpanded] = useState(false);
   const w = imageWidth || naturalSize.w;
   const h = imageHeight || naturalSize.h;
+
+  // Close on Escape — same affordance as the outer Modal.
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setExpanded(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [expanded]);
+
+  // Render the overlay rects at a given container size (px). When the parent
+  // container is the natural-size image, percentage math gives pixel-perfect
+  // alignment. We compute left/top/width/height in pixels here so the
+  // lightbox can use any container size we like.
+  const renderOverlays = (containerW, containerH) => {
+    if (!(w > 0 && h > 0) || !Array.isArray(textBoxes) || textBoxes.length === 0) return null;
+    return textBoxes.map((tb, i) => {
+      const bbox = Array.isArray(tb.bbox) ? tb.bbox : [];
+      if (bbox.length < 4) return null;
+      const xs = bbox.map((p) => p[0]);
+      const ys = bbox.map((p) => p[1]);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      const maxX = Math.max(...xs);
+      const maxY = Math.max(...ys);
+      const left = (minX / w) * containerW;
+      const top = (minY / h) * containerH;
+      const width = ((maxX - minX) / w) * containerW;
+      const height = ((maxY - minY) / h) * containerH;
+      const pct = Math.round((tb.confidence || 0) * 100);
+      return (
+        <div
+          key={i}
+          className={`absolute border ${confidenceTierClass(tb.confidence || 0)} rounded-sm ${expanded ? 'cursor-pointer hover:bg-current/10' : 'pointer-events-none'}`}
+          style={{
+            left: `${left}px`,
+            top: `${top}px`,
+            width: `${width}px`,
+            height: `${height}px`,
+          }}
+          title={`${languageFlag(tb.language)} "${tb.text}" · ${pct}% confidence`}
+        />
+      );
+    });
+  };
+
   return (
-    <div className="relative inline-block w-full">
-      <img
-        src={src}
-        alt={alt}
-        onLoad={(e) => setNaturalSize({ w: e.target.naturalWidth, h: e.target.naturalHeight })}
-        className="block w-full h-auto rounded-lg border border-border bg-white"
-      />
-      {w > 0 && h > 0 && Array.isArray(textBoxes) && textBoxes.length > 0 && textBoxes.map((tb, i) => {
-        const bbox = Array.isArray(tb.bbox) ? tb.bbox : [];
-        if (bbox.length < 4) return null;
-        // 4-point polygon: take minX/minY/maxX/maxY for axis-aligned overlay.
-        const xs = bbox.map((p) => p[0]);
-        const ys = bbox.map((p) => p[1]);
-        const left = (Math.min(...xs) / w) * 100;
-        const top = (Math.min(...ys) / h) * 100;
-        const width = ((Math.max(...xs) - Math.min(...xs)) / w) * 100;
-        const height = ((Math.max(...ys) - Math.min(...ys)) / h) * 100;
-        return (
-          <div
-            key={i}
-            className={`absolute border ${confidenceTierClass(tb.confidence || 0)} rounded-sm pointer-events-none`}
-            style={{
-              left: `${left}%`,
-              top: `${top}%`,
-              width: `${width}%`,
-              height: `${height}%`,
-            }}
-            title={`"${tb.text}" · ${Math.round((tb.confidence || 0) * 100)}% confidence`}
+    <>
+      <div className="relative w-full overflow-auto max-h-[44vh] rounded-lg border border-border bg-white">
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          aria-label="Expand source image"
+          className="block w-full cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-primary/40"
+        >
+          <img
+            src={src}
+            alt={alt}
+            onLoad={(e) => setNaturalSize({ w: e.target.naturalWidth, h: e.target.naturalHeight })}
+            className="block w-full h-auto"
           />
-        );
-      })}
-    </div>
+        </button>
+        {/* Overlays in thumbnail view: pinned to the image's percentage
+            bounding box. pointer-events-none so clicks fall through to the
+            zoom button underneath. */}
+        {w > 0 && h > 0 && (
+          <div className="pointer-events-none absolute inset-0">
+            {textBoxes?.map((tb, i) => {
+              const bbox = Array.isArray(tb.bbox) ? tb.bbox : [];
+              if (bbox.length < 4) return null;
+              const xs = bbox.map((p) => p[0]);
+              const ys = bbox.map((p) => p[1]);
+              const left = (Math.min(...xs) / w) * 100;
+              const top = (Math.min(...ys) / h) * 100;
+              const width = ((Math.max(...xs) - Math.min(...xs)) / w) * 100;
+              const height = ((Math.max(...ys) - Math.min(...ys)) / h) * 100;
+              const pct = Math.round((tb.confidence || 0) * 100);
+              return (
+                <div
+                  key={i}
+                  className={`absolute border ${confidenceTierClass(tb.confidence || 0)} rounded-sm`}
+                  style={{
+                    left: `${left}%`,
+                    top: `${top}%`,
+                    width: `${width}%`,
+                    height: `${height}%`,
+                  }}
+                  title={`${languageFlag(tb.language)} "${tb.text}" · ${pct}% confidence`}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Lightbox: fullscreen overlay with the image at natural size and
+          overlays scaled in pixels. Backdrop click or Esc closes it. */}
+      {expanded && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 p-4 animate-fade-in"
+          onClick={() => setExpanded(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${alt || 'Source image'} expanded view`}
+        >
+          <div className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-card shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-foreground">{alt || 'Source image'}</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {w > 0 && h > 0 ? `${w} × ${h} px · ${textBoxes?.length || 0} words · click backdrop or press Esc to close` : 'Click backdrop or press Esc to close'}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm border border-emerald-500 bg-emerald-500/20" /> ≥0.8
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm border border-amber-500 bg-amber-500/20" /> 0.5–0.8
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm border border-red-500 bg-red-500/20" /> &lt;0.5
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded(false);
+                  }}
+                  className="ml-2 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer"
+                  aria-label="Close expanded view"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div
+              className="relative min-h-0 flex-1 overflow-auto bg-white p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="relative mx-auto"
+                style={{
+                  width: w > 0 ? `${w}px` : 'auto',
+                  height: h > 0 ? `${h}px` : 'auto',
+                  maxWidth: '100%',
+                }}
+              >
+                <img
+                  src={src}
+                  alt={alt}
+                  className="block h-auto w-full select-none"
+                  draggable={false}
+                  style={w > 0 ? { width: `${w}px`, height: `${h}px`, maxWidth: 'none' } : undefined}
+                />
+                {/* Pixel-anchored overlays matching the natural-size image. */}
+                <div className="pointer-events-none absolute inset-0">
+                  {renderOverlays(w, h)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -174,6 +325,8 @@ export function ScanReviewModal({
   missingKeywords,
   pages,
   imagePreviews,
+  nepaliText,
+  englishText,
 }) {
   const [activePage, setActivePage] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -192,6 +345,13 @@ export function ScanReviewModal({
     ? pages.map((p) => p.extractedTextPreview || '')
     : (extractedText ? [extractedText] : ['']);
 
+  // Tier-3 #16: when the AI service returned per-language partitions AND the
+  // active page has them too (for multi-page), split the right pane into two
+  // labeled blocks. Otherwise fall back to the merged single view.
+  const hasNe = typeof nepaliText === 'string' && nepaliText.trim().length > 0;
+  const hasEn = typeof englishText === 'string' && englishText.trim().length > 0;
+  const showSplit = hasNe && hasEn;
+
   // Reset active page when modal reopens.
   useEffect(() => {
     if (open) {
@@ -203,11 +363,29 @@ export function ScanReviewModal({
   const activeImage = pageImages[Math.min(activePage, pageImages.length - 1)] || imagePreview;
   const activeText = pageTexts[Math.min(activePage, pageTexts.length - 1)] || extractedText || '';
 
+  // For multi-page + split view, prefer the active page's per-language strings
+  // when the AI service returned them; fall back to file-level partitions.
+  const activeNe = usePages && Array.isArray(pages) && pages[activePage]?.nepaliText !== undefined
+    ? (pages[activePage].nepaliText || '')
+    : nepaliText;
+  const activeEn = usePages && Array.isArray(pages) && pages[activePage]?.englishText !== undefined
+    ? (pages[activePage].englishText || '')
+    : englishText;
+  const useSplit = showSplit && (activeNe || activeEn);
+
   const foundRegex = useMemo(() => buildKeywordRegex(foundKeywords), [foundKeywords]);
   const missingRegex = useMemo(() => buildKeywordRegex(missingKeywords), [missingKeywords]);
   const segments = useMemo(
     () => splitByKeywords(activeText || '', foundRegex, missingRegex),
     [activeText, foundRegex, missingRegex]
+  );
+  const neSegments = useMemo(
+    () => splitByKeywords(activeNe || '', foundRegex, missingRegex),
+    [activeNe, foundRegex, missingRegex]
+  );
+  const enSegments = useMemo(
+    () => splitByKeywords(activeEn || '', foundRegex, missingRegex),
+    [activeEn, foundRegex, missingRegex]
   );
 
   const handleCopy = async () => {
@@ -243,6 +421,11 @@ export function ScanReviewModal({
       description={documentLabel
         ? `Inspect the AI's reading of "${documentLabel}". Green boxes are high-confidence words; amber/red need a second look.`
         : 'Inspect the AI OCR result side-by-side with the source image.'}
+      // Wider than the default `max-w-lg` so the image and text panes sit
+      // side-by-side comfortably without being squeezed into a tall narrow
+      // column. Pairs with the Modal's own `max-h-[90vh]` + scrolling body
+      // so the window stays anchored and the inner content scrolls.
+      className="max-w-5xl"
     >
       <div className="space-y-4">
         {/* Tier-3 #15: page tabs when multi-page */}
@@ -309,8 +492,72 @@ export function ScanReviewModal({
                 </span>
               </span>
             </div>
-            {activeText ? (
-              <div className="max-h-[60vh] overflow-auto rounded-lg border border-border bg-card p-3 font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap break-words">
+            {useSplit ? (
+              // Tier-3 #16: two stacked language blocks with per-block keyword
+              // highlighting, so officers can see Nepali vs. English side-by-side
+              // without scrolling through a wall of mixed characters.
+              <div className="space-y-2 max-h-[44vh] overflow-auto pr-1">
+                {activeNe && (
+                  <div className="rounded-lg border border-border bg-card p-3">
+                    <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span aria-hidden="true">🇳🇵</span> Nepali
+                      </span>
+                      <span>{activeNe.length.toLocaleString()} chars</span>
+                    </div>
+                    <div className="max-h-[18vh] overflow-auto font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap break-words">
+                      {neSegments.map((seg, i) => {
+                        if (seg.kind === 'missing') {
+                          return (
+                            <mark key={i} className="rounded-sm bg-red-500/20 px-0.5 text-red-700 dark:text-red-300" title="Missing required keyword">
+                              {seg.value}
+                            </mark>
+                          );
+                        }
+                        if (seg.kind === 'found') {
+                          return (
+                            <mark key={i} className="rounded-sm bg-emerald-500/20 px-0.5 text-emerald-700 dark:text-emerald-300" title="Found required keyword">
+                              {seg.value}
+                            </mark>
+                          );
+                        }
+                        return <React.Fragment key={i}>{seg.value}</React.Fragment>;
+                      })}
+                    </div>
+                  </div>
+                )}
+                {activeEn && (
+                  <div className="rounded-lg border border-border bg-card p-3">
+                    <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span aria-hidden="true">🇬🇧</span> English
+                      </span>
+                      <span>{activeEn.length.toLocaleString()} chars</span>
+                    </div>
+                    <div className="max-h-[18vh] overflow-auto font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap break-words">
+                      {enSegments.map((seg, i) => {
+                        if (seg.kind === 'missing') {
+                          return (
+                            <mark key={i} className="rounded-sm bg-red-500/20 px-0.5 text-red-700 dark:text-red-300" title="Missing required keyword">
+                              {seg.value}
+                            </mark>
+                          );
+                        }
+                        if (seg.kind === 'found') {
+                          return (
+                            <mark key={i} className="rounded-sm bg-emerald-500/20 px-0.5 text-emerald-700 dark:text-emerald-300" title="Found required keyword">
+                              {seg.value}
+                            </mark>
+                          );
+                        }
+                        return <React.Fragment key={i}>{seg.value}</React.Fragment>;
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : activeText ? (
+              <div className="max-h-[44vh] overflow-auto rounded-lg border border-border bg-card p-3 font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap break-words">
                 {segments.map((seg, i) => {
                   if (seg.kind === 'missing') {
                     return (

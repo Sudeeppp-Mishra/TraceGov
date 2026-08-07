@@ -11,10 +11,12 @@ from __future__ import annotations
 import io
 import os
 import re
+import base64
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import cv2
 
 from preprocessing import inspect_image_quality, preprocess_image_pipeline
 from stamp_detection import detect_government_stamp
@@ -99,6 +101,38 @@ def detect_script(text: str) -> dict[str, Any]:
     else:
         language = "english"
     return {"language": language, "devanagariRatio": round(ratio, 2)}
+
+
+def classify_script(text: str) -> str:
+    """Per-word script tag using the same Devanagari thresholds as detect_script.
+
+    Returns 'ne' (mostly Devanagari), 'en' (mostly Latin), 'mixed', or 'unknown'
+    when there are no alphabetic characters. Used to tag each textBox so the
+    frontend can render language-aware overlays and split the extracted text
+    into Nepali and English blocks.
+    """
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return "unknown"
+    devanagari = sum(1 for ch in letters if DEVANAGARI_RE.match(ch))
+    ratio = devanagari / len(letters)
+    if ratio > 0.6:
+        return "ne"
+    if ratio > 0.15:
+        return "mixed"
+    return "en"
+
+
+def split_text_by_language(text_boxes: list[dict]) -> tuple[str, str]:
+    """Split detected words into Nepali-only and English-only joined strings.
+
+    Words tagged 'mixed' (e.g. addresses with both scripts) are excluded from
+    both blocks — they remain in `extractedText` as a fallback view. Words
+    tagged 'unknown' (digits, punctuation-heavy) are also excluded.
+    """
+    ne_words = [tb["text"] for tb in text_boxes if tb.get("language") == "ne"]
+    en_words = [tb["text"] for tb in text_boxes if tb.get("language") == "en"]
+    return " ".join(ne_words), " ".join(en_words)
 
 
 def keyword_aliases(keyword: str) -> list[str]:
@@ -270,6 +304,7 @@ def run_full_ocr_analysis(
                     "text": txt_str,
                     "bbox": [[float(p[0]), float(p[1])] for p in bbox],
                     "confidence": round(float(prob), 3),
+                    "language": classify_script(txt_str),
                 })
 
         text = " ".join(detected_parts)
@@ -303,6 +338,12 @@ def run_full_ocr_analysis(
     keyword_result = check_keywords_with_confidence(text, keywords, easyocr_confidence)
     classification = classify_document_ml_or_heuristic(text)
     script_info = detect_script(text)
+
+    # Per-script partitioning of detected words. Safe when text_boxes is empty
+    # (the detected_text path) — returns empty strings and the frontend falls
+    # back to the single-block merged view.
+    safe_text_boxes = text_boxes if "text_boxes" in locals() and text_boxes else []
+    nepali_text, english_text = split_text_by_language(safe_text_boxes)
 
     # ── Stamp-aware score adjustments ───────────────────────────────────
     if stamp_analysis and stamp_analysis.get("stampDetected"):
@@ -364,6 +405,21 @@ def run_full_ocr_analysis(
                 "matchType": "not_found",
             }
 
+    # Encode the preprocessed image as a base64 data URL so the frontend
+    # OCR review modal can render bounding boxes in their true coordinate
+    # space. Without this, the bboxes are in preprocessed-image pixels
+    # (deskewed + cropped) but the modal renders the original upload —
+    # boxes land in the wrong places. JPEG keeps the response small; switch
+    # to PNG when transparency / lossless text rendering is needed.
+    preprocessed_data_url = None
+    if cv_img is not None:
+        try:
+            ok, buf = cv2.imencode('.jpg', cv_img, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+            if ok:
+                preprocessed_data_url = "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode('ascii')
+        except Exception:
+            preprocessed_data_url = None
+
     return {
         **keyword_result,
         **classification,
@@ -381,4 +437,12 @@ def run_full_ocr_analysis(
         "textBoxes": text_boxes if 'text_boxes' in locals() and text_boxes else [],
         "imageWidth": int(image_width) if 'image_width' in locals() else 0,
         "imageHeight": int(image_height) if 'image_height' in locals() else 0,
+        # Tier-3 #17: preprocessed image data URL so the modal can render
+        # the scan in the same coordinate space the bboxes are in. When
+        # absent the frontend falls back to the original upload.
+        "preprocessedImageDataUrl": preprocessed_data_url,
+        # Per-language partitions so the frontend can render two labeled
+        # blocks ("🇳🇵 Nepali" / "🇬🇧 English") in the extracted-text modal.
+        "nepaliText": nepali_text,
+        "englishText": english_text,
     }

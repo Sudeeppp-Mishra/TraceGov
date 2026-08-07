@@ -264,6 +264,10 @@ export default function RegisterFilePage() {
         status: item.status,
         extractedTextPreview: item.scanResult?.extractedTextPreview || null,
         extractedText: item.scanResult?.extractedText || null,
+        // Per-language partitions so what the officer sees during registration
+        // is what gets persisted (no surprise re-classification on save).
+        nepaliText: item.scanResult?.nepaliText || null,
+        englishText: item.scanResult?.englishText || null,
         textBoxes: item.scanResult?.textBoxes || [],
         imageWidth: item.scanResult?.imageWidth || 0,
         imageHeight: item.scanResult?.imageHeight || 0,
@@ -587,6 +591,25 @@ export default function RegisterFilePage() {
 
                   return (
                     <div className={`rounded-xl border p-3.5 text-xs ${palette}`}>
+                      {/* Identity-check headline — single line that tells the
+                          officer whether every scanned document carried the
+                          citizen's name. This is the highest-signal piece
+                          of information for the registration decision. */}
+                      {withName.length > 0 && (
+                        <div className="flex items-center gap-2 font-semibold pb-1.5 border-b border-current/10 mb-1.5">
+                          {allNameMatch ? (
+                            <Icons.User className="h-4 w-4 text-emerald-600 shrink-0" />
+                          ) : (
+                            <Icons.AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                          )}
+                          <span className={titleColor}>
+                            {allNameMatch
+                              ? `Name verified on all ${withName.length} scanned document${withName.length > 1 ? 's' : ''}`
+                              : `Name not matched on ${nameFailed.length} of ${withName.length} document${withName.length > 1 ? 's' : ''} — review before registering`}
+                          </span>
+                        </div>
+                      )}
+
                       {/* Header row — name match headline (preserves the previous copy) */}
                       <div className="flex items-center gap-2 font-semibold">
                         {tone === 'emerald'

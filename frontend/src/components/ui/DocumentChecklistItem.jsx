@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Icons, Button, Badge, ExtractedTextModal, StampOverlayImage, ScanReviewModal } from './index';
+import { Icons, Button, ExtractedTextModal, StampOverlayImage, ScanReviewModal } from './index';
 
 const LANGUAGE_LABELS = {
   nepali: 'Nepali (नेपाली)',
@@ -50,6 +50,136 @@ function qualityWarning(quality) {
   return null;
 }
 
+// Plain-language verdict badge. Pulls three independent signals — document
+// classification, citizen-name match, and stamp detection — into one glance-
+// able row so non-technical officers can read this without parsing OCR
+// jargon. The technical pills (completeness %, raw OCR confidence, etc.)
+// still exist in the collapsible "Advanced details" section below.
+function VerificationVerdict({ scanResult }) {
+  if (!scanResult || scanResult.serviceUnavailable) return null;
+
+  const quality = scanResult.imageQualityIssue;
+  const hasQualityIssue = quality && (quality.noTextDetected || quality.isBlurry || quality.isDark);
+
+  // ── Document authentic? ──────────────────────────────────────────────
+  const docClassified = scanResult.documentType && scanResult.documentType !== 'Unknown';
+  const docConf = scanResult.classificationConfidence || 0;
+  const documentLooksAuthentic = docClassified && docConf >= 0.6 && !hasQualityIssue;
+
+  // ── Name check ───────────────────────────────────────────────────────
+  const nv = scanResult.nameVerification;
+  // Name verification only ran when a citizen name was sent to the AI
+  // service. If neither name nor nepali name was passed, the AI returns
+  // null for this field — that's the "not checked" case.
+  const nameWasChecked = nv !== undefined && nv !== null;
+  const nameFound = !!(nameWasChecked && nv.nameFound && (nv.matchConfidence || 0) >= 0.7);
+  const nameNotMatched = nameWasChecked && !nv.nameFound;
+
+  // ── Stamp check ──────────────────────────────────────────────────────
+  const stamp = scanResult.stampAnalysis;
+  const stampChecked = stamp !== undefined && stamp !== null;
+  const stampDetected = !!(stampChecked && stamp.stampDetected);
+
+  // Color tokens for badges.
+  const emerald = 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
+  const amber = 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30';
+  const red = 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/30';
+  const muted = 'bg-muted text-muted-foreground border-border';
+
+  return (
+    <div className="space-y-1.5">
+      {/* Document authenticity */}
+      {documentLooksAuthentic ? (
+        <div className={`flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${emerald}`}>
+          <Icons.CheckCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-semibold leading-tight">Document looks authentic</p>
+            <p className="text-[11px] opacity-80 mt-0.5">
+              Recognized as {scanResult.documentType}
+              {docConf > 0 ? ` · ${Math.round(docConf * 100)}% confident` : ''}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className={`flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${amber}`}>
+          <Icons.AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-semibold leading-tight">Document type unclear</p>
+            <p className="text-[11px] opacity-80 mt-0.5">
+              {hasQualityIssue
+                ? 'Image quality is poor — re-scan for a clearer picture.'
+                : docClassified
+                  ? `Low recognition confidence (${Math.round(docConf * 100)}%).`
+                  : "We couldn't recognize this document type. Officer should verify manually."}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Name check — the headline officers actually care about */}
+      {nameFound ? (
+        <div className={`flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${emerald}`}>
+          <Icons.User className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-semibold leading-tight">Name verified</p>
+            <p className="text-[11px] opacity-80 mt-0.5">
+              &ldquo;{nv.matchedName || ''}&rdquo; matches the name entered on the form.
+            </p>
+          </div>
+        </div>
+      ) : nameNotMatched ? (
+        <div className={`flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${red}`}>
+          <Icons.AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-semibold leading-tight">Name not matched</p>
+            <p className="text-[11px] opacity-80 mt-0.5">
+              The name entered for this file was not found on this scan. Officer
+              discretion applies — the file can still be registered.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className={`flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${muted}`}>
+          <Icons.User className="h-3.5 w-3.5 mt-0.5 shrink-0 opacity-70" />
+          <div className="min-w-0">
+            <p className="font-semibold leading-tight">Name not checked on this document</p>
+            <p className="text-[11px] opacity-80 mt-0.5">
+              Enter the citizen&rsquo;s name in the form before scanning to compare names automatically.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Stamp check */}
+      {stampChecked && (
+        stampDetected ? (
+          <div className={`flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${emerald}`}>
+            <Icons.ShieldCheck className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <p className="font-semibold leading-tight">Official stamp detected</p>
+              <p className="text-[11px] opacity-80 mt-0.5">
+                {stamp.stampCount > 1
+                  ? `${stamp.stampCount} stamps found on this scan.`
+                  : (stamp.stampColor ? `${stamp.stampColor[0].toUpperCase()}${stamp.stampColor.slice(1)} stamp visible on the scan.` : 'Stamp visible on the scan.')}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className={`flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${amber}`}>
+            <Icons.Shield className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <p className="font-semibold leading-tight">No stamp detected</p>
+              <p className="text-[11px] opacity-80 mt-0.5">
+                Some required documents must carry an official stamp. Re-scan or attach the original.
+              </p>
+            </div>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 export function DocumentChecklistItem({
   item,
   onLabelChange,
@@ -63,6 +193,7 @@ export function DocumentChecklistItem({
   const [textExpanded, setTextExpanded] = useState(false);
   const [fullTextOpen, setFullTextOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const tier = confidenceTier(scanResult);
 
   // True when the AI service returned text beyond the 500-char preview —
@@ -76,6 +207,15 @@ export function DocumentChecklistItem({
   // bounding boxes (image path) — the legacy `detectedText` path keeps the
   // plain full-text modal as fallback.
   const hasReviewableBoxes = Array.isArray(scanResult?.textBoxes) && scanResult.textBoxes.length > 0;
+
+  // The status pill becomes a red "Name mismatch" when keywords are all
+  // present and quality is fine — the only failure is the name not appearing.
+  const nv = scanResult?.nameVerification;
+  const nameWasChecked = nv !== undefined && nv !== null;
+  const nameNotMatched = nameWasChecked && !nv.nameFound;
+  const hasMissingKeywords = (scanResult?.missingKeywords || []).length > 0;
+  const qualityWarn = scanResult ? qualityWarning(scanResult.imageQualityIssue) : null;
+  const isPureNameMismatch = status === 'needs_review' && nameNotMatched && !hasMissingKeywords && !qualityWarn;
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 transition-all hover:border-border-strong">
@@ -109,6 +249,10 @@ export function DocumentChecklistItem({
           ) : status === 'verified' ? (
             <span className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
               <Icons.Check className="h-3.5 w-3.5" /> Verified
+            </span>
+          ) : isPureNameMismatch ? (
+            <span className="flex items-center gap-1 rounded-full bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-600 dark:text-red-400">
+              <Icons.AlertCircle className="h-3.5 w-3.5" /> Name mismatch
             </span>
           ) : status === 'needs_review' ? (
             <span className="flex items-center gap-1 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
@@ -191,32 +335,17 @@ export function DocumentChecklistItem({
                     </Button>
                   </div>
                 ) : scanResult ? (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-md bg-primary/10 px-2 py-0.5 font-semibold text-primary">
-                        {scanResult.documentType || label} ({Math.round((scanResult.classificationConfidence || 0) * 100)}%)
-                      </span>
-                      <span className="rounded-md bg-muted px-2 py-0.5 text-muted-foreground">
-                        {LANGUAGE_LABELS[scanResult.detectedLanguage] || 'Nepali / English'}
-                      </span>
-                      {typeof scanResult.completenessScore === 'number' && (
-                        <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 font-semibold text-muted-foreground" title={`Completeness ${Math.round(scanResult.completenessScore * 100)}%`}>
-                          <CompletenessRing value={scanResult.completenessScore} />
-                          {Math.round(scanResult.completenessScore * 100)}%
-                        </span>
-                      )}
-                      {tier && (
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${tier.className}`}
-                          title={`OCR ${Math.round((scanResult.ocrConfidence || 0) * 100)}% · ${scanResult.classificationSource || 'unknown'}`}
-                        >
-                          {tier.label} confidence
-                        </span>
-                      )}
-                    </div>
+                  <div className="space-y-2.5">
+                    {/* Plain-language verdict row — three independent badges
+                        (document / name / stamp) so non-technical officers
+                        can read the result in one glance. The technical
+                        metrics live in the collapsible "Advanced details"
+                        section below. */}
+                    <VerificationVerdict scanResult={scanResult} />
 
-                    {/* Image-quality warning (Tier-1 #2): inline warning so officers
-                        know whether to trust this scan before approving. */}
+                    {/* Image-quality warning stays at the top — officers
+                        need to see "Image is blurry — re-scan" immediately,
+                        not buried behind a toggle. */}
                     {(() => {
                       const warn = qualityWarning(scanResult.imageQualityIssue);
                       if (!warn) return null;
@@ -229,7 +358,7 @@ export function DocumentChecklistItem({
                           <div className="min-w-0">
                             <p className="font-semibold leading-tight">{warn.text}</p>
                             {typeof scanResult.imageQualityIssue?.qualityScore === 'number' && (
-                              <p className="text-[10px] opacity-80 mt-0.5">
+                              <p className="text-[11px] opacity-80 mt-0.5">
                                 Quality score {Math.round(scanResult.imageQualityIssue.qualityScore * 100)}%
                               </p>
                             )}
@@ -238,10 +367,11 @@ export function DocumentChecklistItem({
                       );
                     })()}
 
-                    {/* Missing-keywords explanation (Tier-1 #3): prefer the
-                        human-readable highlightedMissingItems messages; fall back
-                        to a generic sentence built from the bare keywords. */}
-                    {(scanResult.missingKeywords || []).length > 0 ? (
+                    {/* Missing-keywords explanation stays visible — it's the
+                        officer's most actionable signal after the verdict
+                        row (which document must be re-scanned, and which
+                        word the AI couldn't find). */}
+                    {(scanResult.missingKeywords || []).length > 0 && (
                       <div className="rounded-md bg-amber-500/10 px-2 py-1.5">
                         <p className="font-semibold text-amber-700 dark:text-amber-300 flex items-center gap-1">
                           <Icons.AlertCircle className="h-3 w-3 shrink-0" />
@@ -259,66 +389,144 @@ export function DocumentChecklistItem({
                           )}
                         </ul>
                       </div>
-                    ) : (
-                      <p className="text-emerald-600 dark:text-emerald-400 font-medium">
-                        ✓ All expected keywords and structure verified.
-                      </p>
                     )}
 
-                    {/* Stamp / Seal Detection Badge (Tier-1 #5): show count + tier
-                        confidence; if multiple stamps, say so explicitly. */}
-                    {scanResult.stampAnalysis && (
-                      scanResult.stampAnalysis.stampDetected ? (
-                        <p className="flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">
-                          <span className={`inline-block h-2.5 w-2.5 rounded-full ${
-                            scanResult.stampAnalysis.stampColor === 'red' ? 'bg-red-500'
-                            : scanResult.stampAnalysis.stampColor === 'blue' ? 'bg-blue-500'
-                            : 'bg-purple-500'
-                          }`} />
-                          {scanResult.stampAnalysis.stampCount > 1
-                            ? `${scanResult.stampAnalysis.stampCount} official stamps detected`
-                            : `Official ${scanResult.stampAnalysis.stampColor} stamp detected`}
-                          <span className={`font-normal ${
-                            (scanResult.stampAnalysis.stampConfidence || 0) >= 0.6
-                              ? 'text-muted-foreground'
-                              : 'text-amber-600 dark:text-amber-400 font-medium'
-                          }`}>
-                            ({Math.round((scanResult.stampAnalysis.stampConfidence || 0) * 100)}% confidence
-                            {(scanResult.stampAnalysis.stampConfidence || 0) < 0.6 ? ', low' : ''})
-                          </span>
-                        </p>
-                      ) : (
-                        <p className="text-amber-600/70 dark:text-amber-400/70 font-medium">
-                          ◯ No official stamp/seal detected
-                        </p>
-                      )
-                    )}
+                    {/* Advanced details — the original technical pills,
+                        demoted behind a toggle. Officers who want the raw
+                        OCR confidence / match type can expand; everyone
+                        else stays in plain language above. */}
+                    <div className="rounded-lg border border-border bg-background/60">
+                      <button
+                        type="button"
+                        onClick={() => setAdvancedOpen((v) => !v)}
+                        className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        aria-expanded={advancedOpen}
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <Icons.Sparkles className="h-3 w-3" />
+                          {advancedOpen ? 'Hide technical details' : 'Show technical details'}
+                        </span>
+                        <Icons.ChevronDown
+                          className={`h-3 w-3 transition-transform duration-200 ${advancedOpen ? 'rotate-180' : ''}`}
+                        />
+                      </button>
+                      {advancedOpen && (
+                        <div className="space-y-2.5 border-t border-border bg-muted/10 p-3">
+                          {/* Row 1: completeness ring (left) + metadata stack (right).
+                              Ring is large (44px) and shows the score in the
+                              middle so it reads as a metric, not decoration. */}
+                          <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                            {typeof scanResult.completenessScore === 'number' ? (
+                              <div className="relative shrink-0" title={`${Math.round(scanResult.completenessScore * 100)}% of required keywords found in this document`}>
+                                <CompletenessRing value={scanResult.completenessScore} size={56} stroke={4} />
+                                <span className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+                                  <span className="text-[15px] font-bold tabular-nums text-foreground">
+                                    {Math.round(scanResult.completenessScore * 100)}%
+                                  </span>
+                                  <span className="mt-0.5 text-[8px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    keywords
+                                  </span>
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="h-14 w-14 shrink-0 rounded-full border border-dashed border-border" aria-hidden="true" />
+                            )}
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                Required keywords found
+                              </p>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                                  {scanResult.documentType || label}
+                                  {scanResult.classificationConfidence > 0 && (
+                                    <span className="text-primary/70 font-medium">
+                                      · {Math.round(scanResult.classificationConfidence * 100)}% match
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                                  {LANGUAGE_LABELS[scanResult.detectedLanguage] || 'Nepali / English'}
+                                </span>
+                                {tier && (
+                                  <span
+                                    className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold ${tier.className}`}
+                                    title={`OCR confidence ${Math.round((scanResult.ocrConfidence || 0) * 100)}% · source: ${scanResult.classificationSource || 'unknown'}`}
+                                  >
+                                    <span className="font-medium opacity-80">OCR</span>
+                                    <span className="opacity-60">·</span>
+                                    {Math.round((scanResult.ocrConfidence || 0) * 100)}% {tier.label.toLowerCase()}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
 
-                    {/* Name Verification Badge (Tier-1 #4): surface match type so
-                        officers can tell exact vs. fuzzy vs. not-found. */}
-                    {scanResult.nameVerification && (
-                      scanResult.nameVerification.nameFound ? (
-                        <p className="flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">
-                          <Icons.User className="h-3 w-3 shrink-0" />
-                          &quot;{scanResult.nameVerification.matchedName}&quot; found
-                          <span className="text-muted-foreground font-normal">
-                            ({scanResult.nameVerification.matchType} · {Math.round((scanResult.nameVerification.matchConfidence || 0) * 100)}%)
-                          </span>
-                        </p>
-                      ) : (
-                        <p className="flex items-center gap-1.5 text-amber-600/70 dark:text-amber-400/70 font-medium">
-                          <Icons.User className="h-3 w-3 shrink-0" />
-                          Citizen name not found
-                          {scanResult.nameVerification.matchType && scanResult.nameVerification.matchType !== 'not_found' && (
-                            <span className="text-muted-foreground font-normal">
-                              ({scanResult.nameVerification.matchType} · {Math.round((scanResult.nameVerification.matchConfidence || 0) * 100)}%)
-                            </span>
-                          )}
-                        </p>
-                      )
-                    )}
+                          {/* Row 2: stamp & name raw details — small two-column
+                              block so each metric has space to breathe. */}
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            {scanResult.stampAnalysis && (
+                              <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+                                <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                                  scanResult.stampAnalysis.stampColor === 'red' ? 'bg-red-500/10'
+                                  : scanResult.stampAnalysis.stampColor === 'blue' ? 'bg-blue-500/10'
+                                  : 'bg-purple-500/10'
+                                }`}>
+                                  <span className={`h-2.5 w-2.5 rounded-full ${
+                                    scanResult.stampAnalysis.stampColor === 'red' ? 'bg-red-500'
+                                    : scanResult.stampAnalysis.stampColor === 'blue' ? 'bg-blue-500'
+                                    : 'bg-purple-500'
+                                  }`} />
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Stamp analysis
+                                  </p>
+                                  <p className="text-xs font-semibold text-foreground">
+                                    {scanResult.stampAnalysis.stampDetected
+                                      ? scanResult.stampAnalysis.stampCount > 1
+                                        ? `${scanResult.stampAnalysis.stampCount} stamps`
+                                        : `${scanResult.stampAnalysis.stampColor || 'official'} stamp`
+                                      : 'No stamp detected'}
+                                    <span className="ml-1 font-normal text-muted-foreground">
+                                      · {Math.round((scanResult.stampAnalysis.stampConfidence || 0) * 100)}% conf.
+                                    </span>
+                                  </p>
+                                </div>
+                              </div>
+                            )}
 
-                    {/* Extracted-text preview (Tier-1 #1): collapsible so the row
+                            {scanResult.nameVerification && (
+                              <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+                                <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                                  scanResult.nameVerification.nameFound
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                    : 'bg-red-500/10 text-red-600 dark:text-red-400'
+                                }`}>
+                                  <Icons.User className="h-3.5 w-3.5" />
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Name match
+                                  </p>
+                                  <p className="text-xs font-semibold text-foreground">
+                                    {scanResult.nameVerification.nameFound
+                                      ? `Matched · ${scanResult.nameVerification.matchType || 'exact'}`
+                                      : `Not matched · ${scanResult.nameVerification.matchType || 'not_found'}`}
+                                    {scanResult.nameVerification.nameFound && (
+                                      <span className="ml-1 font-normal text-muted-foreground">
+                                        · {Math.round((scanResult.nameVerification.matchConfidence || 0) * 100)}% conf.
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Extracted-text preview — also collapsible so the row
                         stays compact, expand to verify what OCR actually saw.
                         Tier-2 #8: when full text is also captured, an extra
                         "Read full text" button opens the modal viewer. */}
@@ -389,6 +597,8 @@ export function DocumentChecklistItem({
                     onClose={() => setFullTextOpen(false)}
                     documentLabel={label}
                     text={scanResult.extractedText}
+                    nepaliText={scanResult.nepaliText}
+                    englishText={scanResult.englishText}
                   />
                 )}
 
@@ -408,6 +618,8 @@ export function DocumentChecklistItem({
                     extractedText={scanResult.extractedText || scanResult.extractedTextPreview || ''}
                     foundKeywords={scanResult.foundKeywords || []}
                     missingKeywords={scanResult.missingKeywords || []}
+                    nepaliText={scanResult.nepaliText}
+                    englishText={scanResult.englishText}
                   />
                 )}
               </div>

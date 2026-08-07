@@ -138,6 +138,8 @@ def analyze_document(request: AnalyzeDocumentRequest):
                     "imageWidth": result.get("imageWidth", 0),
                     "imageHeight": result.get("imageHeight", 0),
                     "textBoxes": result.get("textBoxes", []),
+                    "nepaliText": result.get("nepaliText", ""),
+                    "englishText": result.get("englishText", ""),
                 }
             ]
             return result
@@ -171,6 +173,8 @@ def analyze_document(request: AnalyzeDocumentRequest):
                 "imageWidth": r.get("imageWidth", 0),
                 "imageHeight": r.get("imageHeight", 0),
                 "textBoxes": r.get("textBoxes", []),
+                "nepaliText": r.get("nepaliText", ""),
+                "englishText": r.get("englishText", ""),
             }
             for i, r in enumerate(per_page_results)
         ]
@@ -206,6 +210,13 @@ def _merge_multi_page_results(per_page_results: list[dict], per_page_meta: list[
         if p.get("extractedText"):
             text_blocks.append(p["extractedText"])
     merged_text = "\n\n".join(text_blocks)
+
+    # Per-language partitions: concatenate across pages so the file-level
+    # `nepaliText` / `englishText` strings are complete for multi-page docs.
+    nepali_blocks = [p.get("nepaliText", "") for p in per_page_results if p.get("nepaliText")]
+    english_blocks = [p.get("englishText", "") for p in per_page_results if p.get("englishText")]
+    merged_nepali = "\n\n".join(nepali_blocks)
+    merged_english = "\n\n".join(english_blocks)
 
     found_set = set()
     missing_set = set()
@@ -304,6 +315,10 @@ def _merge_multi_page_results(per_page_results: list[dict], per_page_meta: list[
         "textBoxes": first_page.get("textBoxes", []) or [],
         "imageWidth": first_meta.get("imageWidth", 0),
         "imageHeight": first_meta.get("imageHeight", 0),
+        # Per-language partitions: empty strings if any page had no words in
+        # that script (frontend falls back to the single-block merged view).
+        "nepaliText": merged_nepali,
+        "englishText": merged_english,
     }
 
 

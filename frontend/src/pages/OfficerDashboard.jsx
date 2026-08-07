@@ -1071,6 +1071,8 @@ function ScanDetailRow({ dv, fileId, idx, citizenName, onReOcrResult }) {
           onClose={() => setFullTextOpen(false)}
           documentLabel={dv.documentLabel}
           text={dv.extractedText}
+          nepaliText={dv.nepaliText}
+          englishText={dv.englishText}
         />
       )}
 
@@ -1094,6 +1096,8 @@ function ScanDetailRow({ dv, fileId, idx, citizenName, onReOcrResult }) {
           extractedText={dv.extractedText || dv.extractedTextPreview || ''}
           foundKeywords={Array.isArray(dv.foundKeywords) ? dv.foundKeywords : []}
           missingKeywords={Array.isArray(dv.missingKeywords) ? dv.missingKeywords : []}
+          nepaliText={dv.nepaliText}
+          englishText={dv.englishText}
         />
       )}
     </div>

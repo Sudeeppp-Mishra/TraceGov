@@ -60,6 +60,9 @@ function evaluateLocalRisk(file) {
  */
 export async function registerFile(req, res, next) {
   try {
+    if (req.user?.role === 'ward_chair') {
+      return res.status(403).json({ error: 'Ward Chair role is inspect-only and cannot register files.' });
+    }
     const {
       title,
       citizenName,
@@ -289,13 +292,244 @@ export async function registerFile(req, res, next) {
 }
 
 /**
+ * Officers sometimes spot registration errors after a file has been entered
+ * into the system — a typo in the citizen's phone, the wrong document category,
+ * a checklist item that was forgotten at registration, etc.
+ *
+ * This endpoint lets them correct any of the 8 core registration fields on an
+ * already-registered file. The 4 identifiers (fileUid / trackingId / qrPayload /
+ * qrDataUrl) plus current routing state (currentStatus / currentLocation /
+ * assignedOfficerId) and the OCR scans (documentVerifications) are deliberately
+ * out of scope — those go through separate endpoints (/forward, /backtrack,
+ * /receive, /resolve-documents, /document-verifications/:idx/re-ocr).
+ *
+ * Every applied change is appended to the immutable MovementHistory ledger as
+ * an `Edited` entry with a human-readable diff, so the tamper-evident audit
+ * chain stays intact. Citizens receive a single combined email + SMS
+ * notification (only when something actually changed — no spam on no-op saves).
+ */
+const EDITABLE_FIELDS = [
+  'title',
+  'citizenName',
+  'citizenNameNepali',
+  'citizenPhone',
+  'citizenEmail',
+  'documentType',
+  'requiredDocuments',
+  'internalNotes',
+];
+
+function diffEditSummary(changes) {
+  if (!changes || changes.length === 0) return 'No-op save (no fields actually changed)';
+  const parts = changes.map(({ field, from, to }) => {
+    if (Array.isArray(from) || Array.isArray(to)) {
+      return `${field} (${Array.isArray(from) ? from.length : 0} → ${Array.isArray(to) ? to.length : 0} item(s))`;
+    }
+    const f = String(from ?? '');
+    const t = String(to ?? '');
+    const shorten = (s) => (s.length <= 24 ? s : `${s.slice(0, 12)}…${s.slice(-8)}`);
+    return `${field} (${shorten(f)} → ${shorten(t)})`;
+  });
+  return `Edited fields: ${parts.join(', ')}`;
+}
+
+export async function editFile(req, res, next) {
+  try {
+    if (req.user?.role === 'ward_chair') {
+      return res.status(403).json({ error: 'Ward Chair role is inspect-only and cannot edit files.' });
+    }
+    const file = await File.findById(req.params.id).select('+internalNotes');
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    // Ward isolation: officers may only edit files registered to their ward.
+    // Admins can edit any file within their own ward scope (the
+    // router-level authorize() already restricts to officer/admin).
+    if (req.user.role === 'officer' && file.wardCode !== req.user.wardCode) {
+      return res.status(403).json({ error: 'You can only edit files in your assigned ward' });
+    }
+
+    if (file.isClosed) {
+      return res.status(400).json({
+        error: 'This file is already closed and cannot be edited. Open a backtrack to amend it instead.',
+      });
+    }
+
+    // Reject unknown keys so a typo'd frontend payload doesn't silently drop data.
+    const providedKeys = Object.keys(req.body || {});
+    const unknownKeys = providedKeys.filter((k) => !EDITABLE_FIELDS.includes(k));
+    if (unknownKeys.length > 0) {
+      return res.status(400).json({
+        error: `Unsupported field(s) cannot be edited: ${unknownKeys.join(', ')}. Allowed: ${EDITABLE_FIELDS.join(', ')}.`,
+      });
+    }
+
+    const updates = {};
+    const errors = [];
+
+    if ('title' in req.body) {
+      const v = String(req.body.title || '').trim();
+      if (!v) errors.push({ field: 'title', message: 'File title cannot be empty' });
+      else if (v.length > 200) errors.push({ field: 'title', message: 'Title cannot exceed 200 characters' });
+      else updates.title = v;
+    }
+
+    if ('citizenName' in req.body) {
+      const v = String(req.body.citizenName || '').trim();
+      if (!v) errors.push({ field: 'citizenName', message: 'Citizen name cannot be empty' });
+      else updates.citizenName = v;
+    }
+
+    if ('citizenNameNepali' in req.body) {
+      const v = String(req.body.citizenNameNepali || '').trim();
+      updates.citizenNameNepali = v || undefined;
+    }
+
+    if ('citizenPhone' in req.body) {
+      const v = String(req.body.citizenPhone || '').trim();
+      if (!/^\d{10}$/.test(v)) errors.push({ field: 'citizenPhone', message: 'Citizen phone must be exactly 10 digits' });
+      else updates.citizenPhone = v;
+    }
+
+    if ('citizenEmail' in req.body) {
+      const raw = String(req.body.citizenEmail || '').trim();
+      if (raw) {
+        if (!/^\S+@\S+\.\S+$/.test(raw)) errors.push({ field: 'citizenEmail', message: 'Please enter a valid email address' });
+        else updates.citizenEmail = raw.toLowerCase();
+      } else {
+        updates.citizenEmail = undefined;
+      }
+    }
+
+    if ('documentType' in req.body) {
+      const v = String(req.body.documentType || '').trim();
+      if (!v) errors.push({ field: 'documentType', message: 'Document category cannot be empty' });
+      else updates.documentType = v;
+    }
+
+    if ('requiredDocuments' in req.body) {
+      const v = req.body.requiredDocuments;
+      if (!Array.isArray(v) || v.some((s) => typeof s !== 'string')) {
+        errors.push({ field: 'requiredDocuments', message: 'requiredDocuments must be an array of strings' });
+      } else {
+        updates.requiredDocuments = v.map((s) => String(s).trim()).filter(Boolean);
+      }
+    }
+
+    if ('internalNotes' in req.body) {
+      const v = req.body.internalNotes;
+      updates.internalNotes = v == null ? undefined : String(v).trim();
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({ success: false, error: 'Validation failed', details: errors });
+    }
+
+    // Snapshot the original 7 field values that we can actually report on
+    // (internalNotes isn't a citizen-visible diff axis).
+    const before = {};
+    for (const field of ['title', 'citizenName', 'citizenNameNepali', 'citizenPhone', 'citizenEmail', 'documentType', 'requiredDocuments']) {
+      before[field] = field in file.toObject() ? file.get(field) : undefined;
+    }
+
+    // Apply the update. findByIdAndUpdate returns the post-update doc with
+    // runValidators enforcing schema constraints (e.g. required fields).
+    const updated = await File.findByIdAndUpdate(
+      req.params.id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).populate('assignedOfficerId', 'name deskLocation');
+
+    if (!updated) {
+      return res.status(404).json({ error: 'File not found after update' });
+    }
+
+    // Compute the actual delta — only fields whose value really changed get
+    // surfaced (a no-op save still produces 200 but a 0-entry ledger entry).
+    const changes = [];
+    for (const field of Object.keys(updates)) {
+      const was = before[field];
+      const now = field in updated.toObject() ? updated.get(field) : undefined;
+      const isArrayField = field === 'requiredDocuments';
+      const equals = isArrayField
+        ? JSON.stringify(Array.isArray(was) ? was : []) === JSON.stringify(Array.isArray(now) ? now : [])
+        : was === now;
+      if (!equals) {
+        changes.push({ field, from: was ?? null, to: now ?? null });
+      }
+    }
+
+    const summary = diffEditSummary(changes);
+
+    // Always append to the ledger — even a 0-change save is logged so the
+    // officer's intent is auditable.
+    const logEntry = await appendMovementLog({
+      fileId: updated._id,
+      officerId: req.user._id,
+      actionType: 'Edited',
+      currentLocation: updated.currentLocation,
+      previousLocation: updated.currentLocation,
+      notes: summary,
+      scannedVia: 'manual',
+    });
+
+    // Citizen-facing notification only fires on real changes (to avoid
+    // notification spam from no-op saves). The existing services accept a
+    // free-form notes string we can dump the diff summary into.
+    let smsNotified = false;
+    let emailNotified = false;
+    if (changes.length > 0) {
+      try {
+        const emailResult = await sendEmailNotification({
+          file: updated,
+          status: 'Edited',
+          location: updated.currentLocation,
+          notes: summary,
+        });
+        emailNotified = emailResult?.success ?? false;
+      } catch (e) {
+        console.warn('editFile: email notification failed:', e.message);
+      }
+      try {
+        const smsResult = await sendSmsNotification({
+          file: updated,
+          status: 'Edited',
+          location: updated.currentLocation,
+          notes: summary,
+        });
+        smsNotified = smsResult?.success ?? false;
+      } catch (e) {
+        console.warn('editFile: SMS notification failed:', e.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      file: updated,
+      changes,
+      summary,
+      ledgerEntry: {
+        actionType: logEntry.actionType,
+        timestamp: logEntry.timestamp,
+        entryHash: logEntry.entryHash,
+      },
+      smsNotified,
+      emailNotified,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * Returns dashboard telemetry summaries (metrics, queues, congestion, recent updates).
  */
 export async function getDashboardSummary(req, res, next) {
   try {
     const wardCode = req.query.wardCode || req.user.wardCode;
     const allWards = req.query.allWards === 'true';
-    const baseFilter = req.user.role === 'admin' && allWards ? {} : { wardCode };
+    const baseFilter = (req.user.role === 'admin' || req.user.role === 'ward_chair') && allWards ? {} : { wardCode };
 
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -618,6 +852,9 @@ export async function backtrackFile(req, res, next) {
  */
 async function sendFileCore(req, res, next, { direction, targetLocation, nextStatus, notes, backtrackReason, internalNotes }) {
   try {
+    if (req.user?.role === 'ward_chair') {
+      throw new Error('Ward Chair role is inspect-only and cannot forward or backtrack files.');
+    }
     const result = await runTransactionalWrite(async (session) => {
       const file = await File.findById(req.params.id).session(session);
       if (!file) {
@@ -756,6 +993,9 @@ async function sendFileCore(req, res, next, { direction, targetLocation, nextSta
  */
 export async function resolveMissingDocuments(req, res, next) {
   try {
+    if (req.user?.role === 'ward_chair') {
+      return res.status(403).json({ error: 'Ward Chair role is inspect-only and cannot modify missing documents.' });
+    }
     const { documentVerification, documentVerifications, resolvedKeywords = [], notes } = req.body;
 
     const file = await File.findById(req.params.id);
@@ -845,12 +1085,27 @@ export async function resolveMissingDocuments(req, res, next) {
 
     await file.save();
 
+    // Compute the documents that were resolved by this exact call so the
+    // MovementHistory entry (and the citizen timeline that reads it) names
+    // them instead of falling back to a generic internal note.
+    const resolvedNow = currentMissing.filter(
+      (kw) => !remainingMissing.some((r) => r.toLowerCase().trim() === kw.toLowerCase().trim())
+    );
+
+    const resolvedNote = resolvedNow.length > 0
+      ? `Missing document${resolvedNow.length === 1 ? '' : 's'} uploaded and verified: ${resolvedNow.join(', ')}`
+      : (isFullyResolved
+          ? 'All required physical document(s) verified by officer. Application processing resumed.'
+          : `Updated missing documents checklist. Remaining: ${remainingMissing.join(', ')}`);
+
     await appendMovementLog({
       fileId: file._id,
       officerId: req.user._id,
       actionType: isFullyResolved ? 'Document Verified' : file.currentStatus,
       currentLocation: file.currentLocation,
-      notes: notes || (isFullyResolved ? 'All required physical document(s) verified by officer. Application processing resumed.' : `Updated missing documents checklist. Remaining: ${remainingMissing.join(', ')}`),
+      // Citizen-facing note — surfaces verbatim in the public timeline.
+      // Caller-supplied `notes` wins so officer-customised copy is preserved.
+      notes: notes || resolvedNote,
     });
 
     // Notify citizen via Email on resolution of missing documents
@@ -888,6 +1143,9 @@ export async function resolveMissingDocuments(req, res, next) {
  */
 export async function receiveFile(req, res, next) {
   try {
+    if (req.user?.role === 'ward_chair') {
+      return res.status(403).json({ error: 'Ward Chair role is inspect-only and cannot receive files.' });
+    }
     const { scannedVia: rawScannedVia, scanned_via, remarks: rawRemarks, manualReason } = req.body;
     const scannedVia = (rawScannedVia || scanned_via || 'manual').toLowerCase();
     const remarks = (rawRemarks || manualReason || '').trim();
@@ -986,12 +1244,16 @@ export async function receiveFile(req, res, next) {
  */
 export async function searchFiles(req, res, next) {
   try {
-    const { q, status, wardCode, limit = 20 } = req.query;
-    const filter = { isClosed: false };
+    const { q, status, wardCode, includeClosed, limit = 50 } = req.query;
+    const filter = {};
+
+    if (includeClosed !== 'true' && !q) {
+      filter.isClosed = false;
+    }
 
     if (status) filter.currentStatus = status;
     if (wardCode) filter.wardCode = wardCode;
-    else if (req.user?.role === 'officer') filter.wardCode = req.user.wardCode;
+    else if (req.user?.role === 'officer' || req.user?.role === 'ward_chair') filter.wardCode = req.user.wardCode;
 
     if (q) {
       const regex = new RegExp(q.trim(), 'i');
@@ -1004,9 +1266,9 @@ export async function searchFiles(req, res, next) {
     }
 
     const files = await File.find(filter)
-      .select('fileUid trackingId title citizenName currentStatus currentLocation updatedAt documentVerification')
+      .select('fileUid trackingId title citizenName currentStatus currentLocation updatedAt documentVerification isClosed')
       .sort({ updatedAt: -1 })
-      .limit(Math.min(Number(limit), 50))
+      .limit(Math.min(Number(limit), 100))
       .lean();
 
     return res.json({ success: true, files, count: files.length });
@@ -1023,14 +1285,21 @@ export async function searchFiles(req, res, next) {
  */
 export async function getOfficerInbox(req, res, next) {
   try {
-    const wardCode = req.user.wardCode;
-    const { scope = 'ward', limit } = req.query;
+    const { scope = 'ward', limit, includeClosed, allWards } = req.query;
+    const filter = {};
 
-    const filter = { wardCode, isClosed: false };
-    if (scope === 'desk') {
+    if (allWards !== 'true' && req.user?.wardCode) {
+      filter.wardCode = req.user.wardCode;
+    }
+
+    if (includeClosed !== 'true' && req.user?.role !== 'ward_chair') {
+      filter.isClosed = false;
+    }
+
+    if (scope === 'desk' && req.user?.role !== 'ward_chair') {
       filter.currentLocation = req.user.deskLocation;
       filter.currentStatus = { $ne: FILE_STATUSES.IN_TRANSIT };
-    } else if (scope === 'incoming') {
+    } else if (scope === 'incoming' && req.user?.role !== 'ward_chair') {
       filter.targetLocation = req.user.deskLocation;
       filter.currentStatus = FILE_STATUSES.IN_TRANSIT;
     } else if (scope === 'bell' || scope === 'all_desk') {
@@ -1041,7 +1310,7 @@ export async function getOfficerInbox(req, res, next) {
     }
 
     let query = File.find(filter)
-      .select('fileUid trackingId title citizenName currentStatus currentLocation targetLocation updatedAt createdAt documentVerification')
+      .select('fileUid trackingId title citizenName currentStatus currentLocation targetLocation updatedAt createdAt documentVerification isClosed')
       .sort({ updatedAt: -1 })
       .limit(Math.min(Number(limit) || 200, 200));
 
@@ -1074,11 +1343,11 @@ export async function getActivityLog(req, res, next) {
     const { officerId, action, from, to } = req.query;
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(Math.max(1, Number(req.query.limit) || 25), 100);
-    const isAdmin = req.user.role === 'admin';
+    const isAdminOrWardChair = req.user.role === 'admin' || req.user.role === 'ward_chair';
 
     const filter = {};
 
-    if (!isAdmin) {
+    if (!isAdminOrWardChair) {
       // Officers may only audit their own actions
       filter.officerId = req.user._id;
     } else if (officerId) {
@@ -1178,6 +1447,9 @@ export async function getFileSmsLogs(req, res, next) {
  */
 export async function reOcrDocumentVerification(req, res, next) {
   try {
+    if (req.user?.role === 'ward_chair') {
+      return res.status(403).json({ error: 'Ward Chair role is inspect-only and cannot re-run OCR.' });
+    }
     const { id, idx } = req.params;
     const idxNum = parseInt(idx, 10);
     if (!Number.isInteger(idxNum) || idxNum < 0) {

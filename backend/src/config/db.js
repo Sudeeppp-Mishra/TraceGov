@@ -4,6 +4,9 @@ import mongoose from 'mongoose';
  * Connects to the MongoDB server.
  */
 export async function connectDatabase() {
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
   const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/tracegov';
 
   try {
@@ -19,7 +22,14 @@ export async function connectDatabase() {
       console.log('MongoDB: Disconnected');
     });
 
-    await mongoose.connect(uri);
+    // Pin reads to the primary replica so analytics queries always see
+    // the freshest data. Atlas replica sets can lag noticeably when the
+    // driver load-balances across secondaries, which makes the dashboard
+    // charts look stale right after a fresh seed.
+    await mongoose.connect(uri, {
+      readPreference: 'primary',
+      readPreferenceTags: [{ nodeType: 'primary' }],
+    });
   } catch (err) {
     console.error(`MongoDB: Initial connection failed: ${err.message}`);
     process.exit(1);

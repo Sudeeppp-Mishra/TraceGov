@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   registerFile,
+  editFile,
   getDashboardSummary,
   scanFile,
   forwardFile,
@@ -19,7 +20,7 @@ import { validateRegisterFile, validateForward, validateBacktrack } from '../mid
 const router = Router();
 
 // Apply auth and staff access to all routes under this controller
-router.use(authenticate, authorize('officer', 'admin'));
+router.use(authenticate, authorize('officer', 'admin', 'ward_chair'));
 
 // Inbox, registration and search endpoints
 router.get('/inbox', getOfficerInbox);
@@ -38,6 +39,10 @@ router.post('/:id/forward', validateForward, forwardFile);
 router.post('/:id/backtrack', validateBacktrack, backtrackFile);
 router.post('/:id/receive', receiveFile);
 router.put('/:id/resolve-documents', resolveMissingDocuments);
+
+// Officer-initiated correction of registration fields. Logs to immutable
+// ledger as actionType 'Edited' so the audit chain stays intact.
+router.put('/:id/details', editFile);
 
 // Tier-3 #13: per-documentVerification re-OCR (officer refresh).
 router.post('/:id/document-verifications/:idx/re-ocr', reOcrDocumentVerification);

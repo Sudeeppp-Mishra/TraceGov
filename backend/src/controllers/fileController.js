@@ -10,6 +10,12 @@ import { appendMovementLog, verifyLogChain } from '../services/ledgerService.js'
 import { sendSmsNotification } from '../services/smsService.js';
 import { sendEmailNotification } from '../services/emailService.js';
 import { aiAnalyzeDocument } from '../services/aiService.js';
+import {
+  isDocMissing,
+  isDocNeedsReview,
+  getMissingDocs,
+  getNeedsReviewDocs,
+} from '../utils/docStatus.js';
 
 // Helper: Calculate processing time differences in minutes
 function minutesBetween(a, b) {
@@ -120,11 +126,12 @@ export async function registerFile(req, res, next) {
     const missingDocs = [];
 
     if (Array.isArray(documentVerifications) && documentVerifications.length > 0) {
+      // Use the shared helper so per-doc bucketing matches the rest of the
+      // system. `needs_review` is intentionally NOT citizen-pending — it's a
+      // status the office already has in hand.
       documentVerifications.forEach((dv) => {
-        if (dv.status !== 'verified' || (dv.missingKeywords && dv.missingKeywords.length > 0)) {
-          if (dv.documentLabel && !missingDocs.includes(dv.documentLabel)) {
-            missingDocs.push(dv.documentLabel);
-          }
+        if (isDocMissing(dv) && dv.documentLabel && !missingDocs.includes(dv.documentLabel)) {
+          missingDocs.push(dv.documentLabel);
         }
       });
 
@@ -133,7 +140,7 @@ export async function registerFile(req, res, next) {
           const match = documentVerifications.find(
             (dv) => dv.documentLabel?.toLowerCase().trim() === reqDoc.toLowerCase().trim()
           );
-          if (!match || match.status !== 'verified') {
+          if (!match || isDocMissing(match)) {
             if (!missingDocs.includes(reqDoc)) {
               missingDocs.push(reqDoc);
             }
@@ -648,12 +655,16 @@ export async function getDashboardSummary(req, res, next) {
     const arrivalRate = Math.max(0.1, Number((todayFilesCount / hoursSinceToday).toFixed(2)));
     const serviceRate = Number(Math.max(arrivalRate + 0.3, arrivalRate / Math.max(queueCongestion, 0.2)).toFixed(2));
 
-    // Enrich files with local prediction heuristics
+    // Enrich files with local prediction heuristics.
+    // The old `/tax|citizen|recommendation|certificate/i.test(d)` regex was a
+    // string-matching shortcut that did NOT reflect the actual per-doc
+    // checklist on the file — it would happily mark a "Citizenship Copy" row
+    // as missing on a file whose checklist was already complete. Use the
+    // shared helper so the dashboard, the citizen track page, and the
+    // registration banner all agree on what's pending.
     const enrichedFiles = recentFiles.map((file) => {
       const risk = evaluateLocalRisk(file);
-      const missingDocs = (file.requiredDocuments || [])
-        .filter((d) => /tax|citizen|recommendation|certificate/i.test(d))
-        .slice(0, 2);
+      const missingDocs = getMissingDocs(file);
 
       return {
         ...file,
@@ -758,6 +769,15 @@ export async function scanFile(req, res, next) {
         assignedOfficer: file.assignedOfficerId,
         updatedAt: file.updatedAt,
         documentVerification: file.documentVerification || null,
+        // Per-doc-source-of-truth memory: the per-doc array was being
+        // stripped here, forcing every downstream consumer to fall back to
+        // the legacy `documentVerification` blob (or, worse, to recompute
+        // status from string heuristics). Surface the canonical fields so
+        // the dashboard and Resolve modal see the same source as the
+        // citizen track endpoint and the email service.
+        documentVerifications: Array.isArray(file.documentVerifications) ? file.documentVerifications : [],
+        verificationStatus: file.verificationStatus || 'unverified',
+        missingDocuments: Array.isArray(file.missingDocuments) ? file.missingDocuments : [],
       },
       recentHistory,
       auditChainValid: integrityReport.valid,
@@ -886,26 +906,21 @@ async function sendFileCore(req, res, next, { direction, targetLocation, nextSta
         if (archiveDesk) destinationDesk = archiveDesk.name;
       }
 
-      // Determine missing documents from per-document verifications and legacy fields
-      const missingList = [];
-      if (Array.isArray(file.documentVerifications) && file.documentVerifications.length > 0) {
-        file.documentVerifications.forEach((dv) => {
-          if (dv.status !== 'verified' || (dv.missingKeywords && dv.missingKeywords.length > 0)) {
-            if (dv.documentLabel && !missingList.includes(dv.documentLabel)) {
-              missingList.push(dv.documentLabel);
-            }
-          }
-        });
-      }
-      if (missingList.length === 0) {
-        const legacyMissing = file.documentVerification?.missingKeywords || file.documentVerification?.missingDocuments || [];
-        missingList.push(...legacyMissing);
-      }
+      // Determine missing documents from per-document verifications and legacy fields.
+      // `needs_review` is intentionally NOT in `missingList` — the office already
+      // has the doc, the citizen isn't holding anything back. We do, however,
+      // surface it via `needsReviewList` so the gate below can still block
+      // forward/backtrack on a workflow-paused file.
+      const fileObjForStatus = { documentVerifications: file.documentVerifications, documentVerification: file.documentVerification };
+      const missingList = getMissingDocs(fileObjForStatus);
+      const needsReviewList = getNeedsReviewDocs(fileObjForStatus);
+      const hasIncompleteDocs = missingList.length > 0 || needsReviewList.length > 0 || file.verificationStatus === 'missing-documents';
 
       const overrideReason = (req.body.overrideReason || req.body.remarks || '').trim();
-      const hasIncompleteDocs = missingList.length > 0 || file.verificationStatus === 'missing-documents';
 
-      // Gate forwarding: block if incomplete, unless officer explicitly provides an override reason
+      // Gate forwarding: block if incomplete, unless officer explicitly provides an override reason.
+      // Only the citizen-pending missingList appears in the 400 message —
+      // `needs_review` is the office's own backlog, not the citizen's.
       if (direction === 'forward' && hasIncompleteDocs) {
         if (!overrideReason) {
           throw new Error(`MISSING_DOCS:${missingList.join(', ')}`);
@@ -1063,9 +1078,10 @@ export async function resolveMissingDocuments(req, res, next) {
     }
 
     const existingVerification = file.documentVerification || {};
-    const currentMissing = (file.documentVerifications && file.documentVerifications.length > 0)
-      ? file.documentVerifications.filter((dv) => dv.status !== 'verified').map((dv) => dv.documentLabel)
-      : (existingVerification.missingKeywords || existingVerification.missingDocuments || []);
+    // Shared helper so per-doc bucketing matches the rest of the system.
+    // `currentMissing` only carries citizen-pending labels — needs_review docs
+    // are the office's own backlog and aren't named in the resolution note.
+    const currentMissing = getMissingDocs(file);
 
     let remainingMissing = [];
     if (resolvedKeywords && resolvedKeywords.length > 0) {
@@ -1537,10 +1553,10 @@ export async function reOcrDocumentVerification(req, res, next) {
       stampAnalysis: result.stampAnalysis ? sanitizeStampAnalysis(result.stampAnalysis) : previous.stampAnalysis,
     };
 
-    // Recompute parent-level verificationStatus + missingDocuments.
-    const stillMissing = file.documentVerifications
-      .filter((entry) => entry.status !== 'verified')
-      .map((entry) => entry.documentLabel);
+    // Recompute parent-level verificationStatus + missingDocuments via the
+    // shared helper so a freshly-re-OCR'd `needs_review` entry doesn't get
+    // added back to the citizen-pending missing list.
+    const stillMissing = getMissingDocs(file);
     file.verificationStatus = stillMissing.length === 0 ? 'complete' : 'missing-documents';
     file.missingDocuments = stillMissing;
 
@@ -1567,6 +1583,361 @@ export async function reOcrDocumentVerification(req, res, next) {
       verificationStatus: file.verificationStatus,
       missingDocuments: file.missingDocuments,
       reOcrCompletedAt: new Date(),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Officer uploads a document on a citizen's behalf (Resolve modal — Missing).
+ *
+ * Sets up an imageBase64 (from officer's camera or file picker), runs the
+ * same AI pipeline as registration, persists OCR into the row, recomputes
+ * parent state via the shared helper, logs a movement entry with
+ * `[OFFICER MANUAL]` prefix, and notifies the citizen on full resolution.
+ *
+ * Officer-only — ward_chair and admin are rejected (admin uses a separate
+ * surface per the officer-only-gating memory).
+ */
+export async function uploadDocumentOnBehalf(req, res, next) {
+  try {
+    if (req.user?.role !== 'officer') {
+      return res.status(403).json({ error: 'Only officers can upload documents on a citizen\'s behalf.' });
+    }
+    const { id, idx } = req.params;
+    const idxNum = parseInt(idx, 10);
+    if (!Number.isInteger(idxNum) || idxNum < 0) {
+      return res.status(400).json({ error: 'Invalid documentVerification index' });
+    }
+
+    const file = await File.findOne({ _id: id, isDeleted: { $ne: true } });
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    if (req.user.role === 'officer' && file.wardCode !== req.user.wardCode) {
+      return res.status(403).json({ error: 'You can only act on files in your assigned ward' });
+    }
+    if (!Array.isArray(file.documentVerifications) || idxNum >= file.documentVerifications.length) {
+      return res.status(400).json({ error: 'Invalid documentVerification index' });
+    }
+
+    const { imageBase64, documentLabel, scannedVia, notes } = req.body || {};
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+      return res.status(400).json({ error: 'imageBase64 is required' });
+    }
+
+    const dv = file.documentVerifications[idxNum];
+
+    const result = await aiAnalyzeDocument({
+      imageBase64,
+      requiredKeywords: dv.documentLabel ? [dv.documentLabel] : undefined,
+    });
+
+    if (result.serviceUnavailable) {
+      return res.status(502).json({ error: 'AI service unavailable', details: result });
+    }
+
+    const missingKeywords = Array.isArray(result.missingKeywords) ? result.missingKeywords : [];
+
+    file.documentVerifications[idxNum] = {
+      ...dv,
+      documentLabel: documentLabel || dv.documentLabel || 'Attachment',
+      imagePreview: imageBase64.slice(0, 2_000_000),
+      imagePreviews: [imageBase64.slice(0, 2_000_000)],
+      scannedAt: new Date(),
+      scannedVia: scannedVia === 'webcam' || scannedVia === 'mobile' ? scannedVia : 'manual',
+      detectedType: result.documentType || dv.detectedType || null,
+      ocrConfidence: typeof result.ocrConfidence === 'number' ? result.ocrConfidence : 0,
+      qualityScore: result.imageQualityIssue?.qualityScore ?? 0.85,
+      completenessScore: typeof result.completenessScore === 'number' ? result.completenessScore : 0,
+      detectedLanguage: result.detectedLanguage || 'unknown',
+      isQualityPassed: result.imageQualityIssue?.isQualityPassed ?? true,
+      missingKeywords,
+      status: missingKeywords.length === 0 ? 'verified' : 'needs_review',
+      extractedTextPreview: result.extractedTextPreview || null,
+      extractedText: result.extractedText || null,
+      nepaliText: typeof result.nepaliText === 'string' ? result.nepaliText : null,
+      englishText: typeof result.englishText === 'string' ? result.englishText : null,
+      textBoxes: Array.isArray(result.textBoxes) ? result.textBoxes.slice(0, 200).map((tb) => ({
+        text: String(tb.text || ''),
+        bbox: Array.isArray(tb.bbox) ? tb.bbox.map((p) => [Number(p[0]) || 0, Number(p[1]) || 0]) : [],
+        confidence: typeof tb.confidence === 'number' ? tb.confidence : 0,
+        language: ['ne', 'en', 'mixed', 'unknown'].includes(tb.language) ? tb.language : null,
+      })) : [],
+      imageWidth: typeof result.imageWidth === 'number' ? result.imageWidth : 0,
+      imageHeight: typeof result.imageHeight === 'number' ? result.imageHeight : 0,
+      preprocessedImageDataUrl: typeof result.preprocessedImageDataUrl === 'string'
+        ? result.preprocessedImageDataUrl.slice(0, 2_000_000) : null,
+      imageQualityIssue: result.imageQualityIssue || undefined,
+      stampAnalysis: result.stampAnalysis ? sanitizeStampAnalysis(result.stampAnalysis) : undefined,
+    };
+
+    const stillMissing = getMissingDocs(file);
+    file.verificationStatus = stillMissing.length === 0 ? 'complete' : 'missing-documents';
+    file.missingDocuments = stillMissing;
+
+    await file.save();
+
+    await appendMovementLog({
+      fileId: file._id,
+      officerId: req.user._id,
+      actionType: stillMissing.length === 0 ? 'Document Verified' : file.currentStatus,
+      currentLocation: file.currentLocation,
+      notes: notes
+        ? `[OFFICER MANUAL] Uploaded on citizen's behalf: ${file.documentVerifications[idxNum].documentLabel} — ${notes}`
+        : `[OFFICER MANUAL] Uploaded on citizen's behalf: ${file.documentVerifications[idxNum].documentLabel}`,
+    });
+
+    if (stillMissing.length === 0) {
+      try {
+        await sendSmsNotification({
+          file,
+          status: file.currentStatus,
+          location: file.currentLocation,
+          missingDocuments: stillMissing,
+        });
+        await sendEmailNotification({
+          file,
+          status: file.currentStatus,
+          location: file.currentLocation,
+          notes: 'All required documents verified. Processing resumed.',
+          missingDocuments: stillMissing,
+        });
+      } catch (notifyErr) {
+        console.warn('uploadDocumentOnBehalf: notification failed:', notifyErr.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      documentVerification: file.documentVerifications[idxNum],
+      verificationStatus: file.verificationStatus,
+      missingDocuments: stillMissing,
+      needsReviewDocuments: getNeedsReviewDocs(file),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Officer re-uploads a `needs_review` scan (Resolve modal — Needs Review).
+ *
+ * Same AI pipeline as upload; the row already has status === 'needs_review'
+ * so we atomically replace the OCR payload. If the new scan resolves all
+ * missing keywords, the row flips to 'verified' and the parent state
+ * recomputes via the shared helper.
+ */
+export async function reuploadDocument(req, res, next) {
+  try {
+    if (req.user?.role !== 'officer') {
+      return res.status(403).json({ error: 'Only officers can re-upload documents.' });
+    }
+    const { id, idx } = req.params;
+    const idxNum = parseInt(idx, 10);
+    if (!Number.isInteger(idxNum) || idxNum < 0) {
+      return res.status(400).json({ error: 'Invalid documentVerification index' });
+    }
+
+    const file = await File.findOne({ _id: id, isDeleted: { $ne: true } });
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    if (req.user.role === 'officer' && file.wardCode !== req.user.wardCode) {
+      return res.status(403).json({ error: 'You can only act on files in your assigned ward' });
+    }
+    if (!Array.isArray(file.documentVerifications) || idxNum >= file.documentVerifications.length) {
+      return res.status(400).json({ error: 'Invalid documentVerification index' });
+    }
+
+    const { imageBase64, scannedVia, notes } = req.body || {};
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+      return res.status(400).json({ error: 'imageBase64 is required' });
+    }
+
+    const dv = file.documentVerifications[idxNum];
+    if (dv.status !== 'needs_review') {
+      return res.status(409).json({
+        error: 'Re-upload is only available for documents currently flagged for review.',
+        currentStatus: dv.status,
+      });
+    }
+
+    const result = await aiAnalyzeDocument({
+      imageBase64,
+      requiredKeywords: dv.documentLabel ? [dv.documentLabel] : undefined,
+    });
+
+    if (result.serviceUnavailable) {
+      return res.status(502).json({ error: 'AI service unavailable', details: result });
+    }
+
+    const missingKeywords = Array.isArray(result.missingKeywords) ? result.missingKeywords : [];
+
+    file.documentVerifications[idxNum] = {
+      ...dv,
+      imagePreview: imageBase64.slice(0, 2_000_000),
+      imagePreviews: [imageBase64.slice(0, 2_000_000)],
+      scannedAt: new Date(),
+      scannedVia: scannedVia === 'webcam' || scannedVia === 'mobile' ? scannedVia : 'manual',
+      detectedType: result.documentType || dv.detectedType || null,
+      ocrConfidence: typeof result.ocrConfidence === 'number' ? result.ocrConfidence : 0,
+      qualityScore: result.imageQualityIssue?.qualityScore ?? 0.85,
+      completenessScore: typeof result.completenessScore === 'number' ? result.completenessScore : 0,
+      detectedLanguage: result.detectedLanguage || 'unknown',
+      isQualityPassed: result.imageQualityIssue?.isQualityPassed ?? true,
+      missingKeywords,
+      status: missingKeywords.length === 0 ? 'verified' : 'needs_review',
+      extractedTextPreview: result.extractedTextPreview || null,
+      extractedText: result.extractedText || null,
+      nepaliText: typeof result.nepaliText === 'string' ? result.nepaliText : null,
+      englishText: typeof result.englishText === 'string' ? result.englishText : null,
+      textBoxes: Array.isArray(result.textBoxes) ? result.textBoxes.slice(0, 200).map((tb) => ({
+        text: String(tb.text || ''),
+        bbox: Array.isArray(tb.bbox) ? tb.bbox.map((p) => [Number(p[0]) || 0, Number(p[1]) || 0]) : [],
+        confidence: typeof tb.confidence === 'number' ? tb.confidence : 0,
+        language: ['ne', 'en', 'mixed', 'unknown'].includes(tb.language) ? tb.language : null,
+      })) : [],
+      imageWidth: typeof result.imageWidth === 'number' ? result.imageWidth : 0,
+      imageHeight: typeof result.imageHeight === 'number' ? result.imageHeight : 0,
+      preprocessedImageDataUrl: typeof result.preprocessedImageDataUrl === 'string'
+        ? result.preprocessedImageDataUrl.slice(0, 2_000_000) : null,
+      imageQualityIssue: result.imageQualityIssue || undefined,
+      stampAnalysis: result.stampAnalysis ? sanitizeStampAnalysis(result.stampAnalysis) : undefined,
+    };
+
+    const stillMissing = getMissingDocs(file);
+    file.verificationStatus = stillMissing.length === 0 ? 'complete' : 'missing-documents';
+    file.missingDocuments = stillMissing;
+
+    await file.save();
+
+    await appendMovementLog({
+      fileId: file._id,
+      officerId: req.user._id,
+      actionType: stillMissing.length === 0 ? 'Document Verified' : file.currentStatus,
+      currentLocation: file.currentLocation,
+      notes: notes
+        ? `Officer re-uploaded ${dv.documentLabel} — ${notes}`
+        : `Officer re-uploaded ${dv.documentLabel}`,
+    });
+
+    return res.json({
+      success: true,
+      documentVerification: file.documentVerifications[idxNum],
+      verificationStatus: file.verificationStatus,
+      missingDocuments: stillMissing,
+      needsReviewDocuments: getNeedsReviewDocs(file),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Officer manual sign-off for `needs_review` (Resolve modal — Reviewed).
+ *
+ * Flips status to 'verified' and clears `missingKeywords`. If the row has
+ * any remaining missing keywords AND `forceVerified` is false, return 400
+ * with `{ needsOverride: true, missingKeywords }` so the officer must
+ * explicitly check the override box before the second submit succeeds.
+ *
+ * The 409-with-named-blocker pattern comes from the officer-only-gating
+ * memory: surface the missing piece rather than silently allow or 500.
+ */
+export async function reviewDocumentReviewed(req, res, next) {
+  try {
+    if (req.user?.role !== 'officer') {
+      return res.status(403).json({ error: 'Only officers can mark documents as reviewed.' });
+    }
+    const { id, idx } = req.params;
+    const idxNum = parseInt(idx, 10);
+    if (!Number.isInteger(idxNum) || idxNum < 0) {
+      return res.status(400).json({ error: 'Invalid documentVerification index' });
+    }
+
+    const file = await File.findOne({ _id: id, isDeleted: { $ne: true } });
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    if (req.user.role === 'officer' && file.wardCode !== req.user.wardCode) {
+      return res.status(403).json({ error: 'You can only act on files in your assigned ward' });
+    }
+    if (!Array.isArray(file.documentVerifications) || idxNum >= file.documentVerifications.length) {
+      return res.status(400).json({ error: 'Invalid documentVerification index' });
+    }
+
+    const { notes, forceVerified } = req.body || {};
+    const dv = file.documentVerifications[idxNum];
+
+    if (dv.status !== 'needs_review') {
+      return res.status(409).json({
+        error: 'Review is only available for documents currently flagged for review.',
+        currentStatus: dv.status,
+      });
+    }
+
+    const remainingKw = Array.isArray(dv.missingKeywords) ? dv.missingKeywords : [];
+    if (remainingKw.length > 0 && !forceVerified) {
+      return res.status(400).json({
+        error: 'Document has flagged missing keywords. Confirm the override to mark as verified.',
+        needsOverride: true,
+        missingKeywords: remainingKw,
+      });
+    }
+
+    file.documentVerifications[idxNum] = {
+      ...dv,
+      status: 'verified',
+      missingKeywords: [],
+      isQualityPassed: true,
+      scannedAt: new Date(),
+    };
+
+    const stillMissing = getMissingDocs(file);
+    file.verificationStatus = stillMissing.length === 0 ? 'complete' : 'missing-documents';
+    file.missingDocuments = stillMissing;
+
+    await file.save();
+
+    const notePrefix = forceVerified && remainingKw.length > 0 ? '[OFFICER OVERRIDE]' : '[OFFICER MANUAL]';
+    await appendMovementLog({
+      fileId: file._id,
+      officerId: req.user._id,
+      actionType: stillMissing.length === 0 ? 'Document Verified' : file.currentStatus,
+      currentLocation: file.currentLocation,
+      notes: notes
+        ? `${notePrefix} Marked ${dv.documentLabel} as reviewed — ${notes}`
+        : `${notePrefix} Marked ${dv.documentLabel} as reviewed`,
+    });
+
+    if (stillMissing.length === 0) {
+      try {
+        await sendSmsNotification({
+          file,
+          status: file.currentStatus,
+          location: file.currentLocation,
+          missingDocuments: stillMissing,
+        });
+        await sendEmailNotification({
+          file,
+          status: file.currentStatus,
+          location: file.currentLocation,
+          notes: 'All required documents verified. Processing resumed.',
+          missingDocuments: stillMissing,
+        });
+      } catch (notifyErr) {
+        console.warn('reviewDocumentReviewed: notification failed:', notifyErr.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      documentVerification: file.documentVerifications[idxNum],
+      verificationStatus: file.verificationStatus,
+      missingDocuments: stillMissing,
+      needsReviewDocuments: getNeedsReviewDocs(file),
     });
   } catch (err) {
     next(err);

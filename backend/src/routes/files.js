@@ -13,6 +13,9 @@ import {
   getFileSmsLogs,
   resolveMissingDocuments,
   reOcrDocumentVerification,
+  uploadDocumentOnBehalf,
+  reuploadDocument,
+  reviewDocumentReviewed,
 } from '../controllers/fileController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { validateRegisterFile, validateForward, validateBacktrack } from '../middleware/validation.js';
@@ -46,6 +49,17 @@ router.put('/:id/details', editFile);
 
 // Tier-3 #13: per-documentVerification re-OCR (officer refresh).
 router.post('/:id/document-verifications/:idx/re-ocr', reOcrDocumentVerification);
+
+// Per-document officer actions surfaced in the Resolve Attachments modal.
+// Officer-only — gated inside each controller via req.user.role so we can
+// return 403 with a specific message instead of a silent pass-through.
+//   upload   — for `not_uploaded` (officer uploads on citizen's behalf)
+//   reupload — for `needs_review` (officer replaces a flagged scan)
+//   reviewed — for `needs_review` (officer manual sign-off; supports
+//              forceVerified override when missingKeywords remain)
+router.post('/:id/document-verifications/:idx/upload', uploadDocumentOnBehalf);
+router.post('/:id/document-verifications/:idx/reupload', reuploadDocument);
+router.post('/:id/document-verifications/:idx/reviewed', reviewDocumentReviewed);
 
 // SMS audit logs endpoint
 router.get('/:id/sms-logs', getFileSmsLogs);

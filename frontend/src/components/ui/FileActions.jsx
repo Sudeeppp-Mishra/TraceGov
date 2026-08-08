@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../../lib/api';
 import { Button, Card, Icons, Input, Modal, Select, Tabs, Textarea } from '.';
+import {
+  getMissingDocs,
+  getNeedsReviewDocs,
+  getVerifiedDocs,
+} from '../../lib/docStatus';
 
 /**
  * Enforces QR-Scan verification as primary action flow for officer file operations.
@@ -35,14 +40,26 @@ export function FileActions({
   const [manualReason, setManualReason] = useState('');
   const [manualReasonError, setManualReasonError] = useState('');
 
-  // Resolve missing documents modal state
+  // Resolve missing documents modal state. Per-row handlers (upload /
+  // reupload / reviewed) drive their own loading + error state — see
+  // uploadLoadingIdx, reviewLoadingIdx, etc. — so there is no bulk
+  // "resolveLoading" or global preview state to manage here.
   const [isResolveModalOpen, setIsResolveModalOpen] = useState(false);
-  const [resolveLoading, setResolveLoading] = useState(false);
   const [resolveNotes, setResolveNotes] = useState('');
-  const [docScanPreview, setDocScanPreview] = useState(null);
-  const [docScanning, setDocScanning] = useState(false);
-  const [docScanResult, setDocScanResult] = useState(null);
-  const [docScanError, setDocScanError] = useState('');
+
+  // Per-row state for the new per-doc actions. Each row tracks its own
+  // loading flag and error message; bulk state lives in `resolveLoading`.
+  const [uploadLoadingIdx, setUploadLoadingIdx] = useState(null);
+  const [uploadErrorIdx, setUploadErrorIdx] = useState({});
+  const [reuploadLoadingIdx, setReuploadLoadingIdx] = useState(null);
+  const [reuploadErrorIdx, setReuploadErrorIdx] = useState({});
+  const [reviewLoadingIdx, setReviewLoadingIdx] = useState(null);
+  const [reviewErrorIdx, setReviewErrorIdx] = useState({});
+  // Per-row override state: when the backend returns 400 with
+  // needsOverride:true, we render an inline checkbox the officer must
+  // check before the second click goes through with forceVerified:true.
+  const [reviewOverrideIdx, setReviewOverrideIdx] = useState({});
+  const [reviewOverrideChecked, setReviewOverrideChecked] = useState({});
 
   const isScanVerified = scannedVia === 'webcam' || scannedVia === 'mobile';
 
@@ -65,10 +82,16 @@ export function FileActions({
     currentUser.deskLocation.toLowerCase().trim() === selectedFile.targetLocation.toLowerCase().trim()
   );
 
-  const missingDocs = (Array.isArray(selectedFile?.documentVerifications) && selectedFile.documentVerifications.length > 0)
-    ? selectedFile.documentVerifications.filter((dv) => dv.status !== 'verified').map((dv) => dv.documentLabel)
-    : (selectedFile?.documentVerification?.missingKeywords || selectedFile?.documentVerification?.missingDocuments || []);
+  // Per-doc source of truth: route through the shared helper so the
+  // banner, the modal, and the email body all agree on what counts as
+  // "missing" vs "needs review" vs "verified".
+  const missingDocs = getMissingDocs(selectedFile);
+  const needsReviewDocs = getNeedsReviewDocs(selectedFile);
+  const verifiedCount = getVerifiedDocs(selectedFile).length;
   const hasMissingDocs = missingDocs.length > 0 || selectedFile?.verificationStatus === 'missing-documents';
+  // needs_review still blocks forward/backtrack (per sendFileCore) but is
+  // NOT a citizen-action banner — it's the office's own backlog.
+  const hasBlockingDocs = hasMissingDocs || needsReviewDocs.length > 0;
 
   const [overrideReason, setOverrideReason] = useState('');
 
@@ -137,81 +160,120 @@ export function FileActions({
     });
   };
 
-  const handleDocFileChangeForItem = async (docLabel, file) => {
+  // Find the index of a label within the file's documentVerifications[]
+  // array. Returns -1 if not found (legacy files without per-doc entries).
+  function findIdx(label) {
+    const dvs = Array.isArray(selectedFile?.documentVerifications) ? selectedFile.documentVerifications : [];
+    return dvs.findIndex((dv) => dv && dv.documentLabel === label);
+  }
+
+  // Per-row handler: officer uploads a missing doc on the citizen's behalf.
+  // Backend runs the standard AI OCR pipeline; status flips to verified on
+  // a clean scan or stays needs_review if OCR flags any missing keywords.
+  const handlePerRowUpload = async (docLabel, file) => {
     if (!file || !file.type.startsWith('image/')) return;
-    setDocScanError('');
-
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const base64 = reader.result;
-      setDocScanPreview(base64);
-      setDocScanning(true);
-      try {
-        const result = await api.analyzeDocument({
-          imageBase64: base64,
-          requiredKeywords: [docLabel],
-        });
-        setDocScanResult(result);
-      } catch {
-        setDocScanError('AI OCR service offline. File photo attached for manual officer verification.');
-      } finally {
-        setDocScanning(false);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleConfirmResolve = async () => {
     const fileId = selectedFile?.id || selectedFile?._id;
     if (!fileId) return;
-    setResolveLoading(true);
-
+    const idx = findIdx(docLabel);
+    if (idx < 0) {
+      setUploadErrorIdx((prev) => ({ ...prev, [docLabel]: 'Document not found in verification array.' }));
+      return;
+    }
+    setUploadLoadingIdx(`${docLabel}-upload`);
+    setUploadErrorIdx((prev) => ({ ...prev, [docLabel]: '' }));
     try {
-      const currentVerifications = Array.isArray(selectedFile?.documentVerifications) && selectedFile.documentVerifications.length > 0
-        ? selectedFile.documentVerifications
-        : (selectedFile?.requiredDocuments || missingDocs).map((lbl) => ({
-            documentLabel: lbl,
-            status: missingDocs.includes(lbl) ? 'not_uploaded' : 'verified',
-          }));
-
-      const updatedVerifications = currentVerifications.map((dv) => {
-        if (missingDocs.includes(dv.documentLabel)) {
-          return {
-            ...dv,
-            status: 'verified',
-            imagePreview: docScanPreview || dv.imagePreview || null,
-            scannedAt: new Date(),
-            detectedType: docScanResult?.documentType || dv.documentLabel,
-            ocrConfidence: docScanResult?.ocrConfidence || 0.9,
-            completenessScore: 1.0,
-            missingKeywords: [],
-          };
-        }
-        return dv;
+      const reader = new FileReader();
+      const base64 = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
       });
-
-      await api.resolveMissingDocuments(fileId, {
-        documentVerifications: updatedVerifications,
-        documentVerification: docScanResult ? {
-          detectedType: docScanResult.documentType,
-          ocrConfidence: docScanResult.ocrConfidence,
-          qualityScore: docScanResult.imageQualityIssue?.qualityScore || 0.9,
-          completenessScore: 1.0,
-          detectedLanguage: docScanResult.detectedLanguage,
-        } : undefined,
-        resolvedKeywords: missingDocs,
-        notes: resolveNotes.trim() || 'Officer uploaded and verified remaining physical documents.',
+      await api.uploadDocumentOnBehalf(fileId, idx, {
+        imageBase64: base64,
+        documentLabel: docLabel,
+        scannedVia: 'manual',
+        notes: resolveNotes.trim() || undefined,
       });
-
-      setIsResolveModalOpen(false);
-      setDocScanPreview(null);
-      setDocScanResult(null);
-      setResolveNotes('');
       if (onResolveSuccess) onResolveSuccess();
     } catch (err) {
-      setManualReasonError(err.message || 'Failed to resolve missing documents.');
+      setUploadErrorIdx((prev) => ({ ...prev, [docLabel]: err.message || 'Upload failed.' }));
     } finally {
-      setResolveLoading(false);
+      setUploadLoadingIdx(null);
+    }
+  };
+
+  // Per-row handler: officer replaces a needs_review scan with a new photo.
+  const handlePerRowReupload = async (docLabel, file) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    const fileId = selectedFile?.id || selectedFile?._id;
+    if (!fileId) return;
+    const idx = findIdx(docLabel);
+    if (idx < 0) {
+      setReuploadErrorIdx((prev) => ({ ...prev, [docLabel]: 'Document not found in verification array.' }));
+      return;
+    }
+    setReuploadLoadingIdx(`${docLabel}-reupload`);
+    setReuploadErrorIdx((prev) => ({ ...prev, [docLabel]: '' }));
+    try {
+      const reader = new FileReader();
+      const base64 = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      await api.reuploadDocument(fileId, idx, {
+        imageBase64: base64,
+        scannedVia: 'manual',
+        notes: resolveNotes.trim() || undefined,
+      });
+      if (onResolveSuccess) onResolveSuccess();
+    } catch (err) {
+      setReuploadErrorIdx((prev) => ({ ...prev, [docLabel]: err.message || 'Re-upload failed.' }));
+    } finally {
+      setReuploadLoadingIdx(null);
+    }
+  };
+
+  // Per-row handler: officer manual sign-off for a needs_review doc.
+  // If the row still has missingKeywords, the first click surfaces the
+  // override checkbox; the second click (with forceVerified:true) flips
+  // the row to verified even though the OCR didn't.
+  const handlePerRowReviewed = async (docLabel) => {
+    const fileId = selectedFile?.id || selectedFile?._id;
+    if (!fileId) return;
+    const idx = findIdx(docLabel);
+    if (idx < 0) {
+      setReviewErrorIdx((prev) => ({ ...prev, [docLabel]: 'Document not found in verification array.' }));
+      return;
+    }
+    const forceVerified = !!reviewOverrideChecked[docLabel];
+    setReviewLoadingIdx(`${docLabel}-reviewed`);
+    setReviewErrorIdx((prev) => ({ ...prev, [docLabel]: '' }));
+    try {
+      await api.reviewDocumentReviewed(fileId, idx, {
+        notes: resolveNotes.trim() || undefined,
+        forceVerified,
+      });
+      // Clear the override flag once the call succeeded.
+      setReviewOverrideChecked((prev) => ({ ...prev, [docLabel]: false }));
+      setReviewOverrideIdx((prev) => ({ ...prev, [docLabel]: false }));
+      if (onResolveSuccess) onResolveSuccess();
+    } catch (err) {
+      // Backend returns 400 with `{ needsOverride: true, missingKeywords }`
+      // when an officer tries to sign off a row whose OCR still has flags
+      // — surface the inline checkbox for explicit confirmation.
+      const data = err?.data || err?.response?.data;
+      if (err?.status === 400 && data?.needsOverride) {
+        setReviewOverrideIdx((prev) => ({ ...prev, [docLabel]: true }));
+        setReviewErrorIdx((prev) => ({
+          ...prev,
+          [docLabel]: `Document has flagged keywords: ${(data.missingKeywords || []).join(', ')}`,
+        }));
+      } else {
+        setReviewErrorIdx((prev) => ({ ...prev, [docLabel]: err.message || 'Review failed.' }));
+      }
+    } finally {
+      setReviewLoadingIdx(null);
     }
   };
 
@@ -306,18 +368,21 @@ export function FileActions({
         </Button>
       </div>
 
-      {/* Missing Required Documents Alert Banner & Edit Modal Trigger */}
-      {hasMissingDocs && !isClosed && (
+      {/* Missing Required Documents Alert Banner & Edit Modal Trigger.
+          Uses `hasBlockingDocs` (not just `hasMissingDocs`) so the banner
+          stays visible while any needs_review row is still pending — the
+          forward/backtrack gate in sendFileCore blocks on both buckets. */}
+      {hasBlockingDocs && !isClosed && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-2.5">
               <Icons.AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
               <div>
                 <strong className="text-sm font-bold text-amber-950 dark:text-amber-100">
-                  Routing Blocked — Remaining Required Document(s) Needed ({missingDocs.length})
+                  Routing Blocked — {missingDocs.length} missing, {needsReviewDocs.length} awaiting review
                 </strong>
                 <p className="text-xs text-amber-900/80 dark:text-amber-300/80 mt-0.5">
-                  Forwarding and backtracking are locked until missing required checklist item(s) are submitted and verified by the officer.
+                  Forwarding and backtracking are locked until the checklist is complete and officer review has been resolved.
                 </p>
               </div>
             </div>
@@ -334,17 +399,29 @@ export function FileActions({
               }}
               className="shrink-0 shadow-sm"
             >
-              <Icons.FileText className="h-3.5 w-3.5" /> Edit / Resolve Missing Documents
+              <Icons.FileText className="h-3.5 w-3.5" /> Edit / Resolve Documents
             </Button>
           </div>
-          <ul className="flex flex-wrap gap-1.5 pt-1">
-            {missingDocs.map((doc) => (
-              <li key={doc} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-950 dark:text-amber-100">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
-                {doc}
-              </li>
-            ))}
-          </ul>
+          {missingDocs.length > 0 && (
+            <ul className="flex flex-wrap gap-1.5 pt-1">
+              {missingDocs.map((doc) => (
+                <li key={doc} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/20 px-2.5 py-1 text-xs font-semibold text-amber-950 dark:text-amber-100">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-600" />
+                  {doc}
+                </li>
+              ))}
+            </ul>
+          )}
+          {needsReviewDocs.length > 0 && (
+            <ul className="flex flex-wrap gap-1.5 pt-1">
+              {needsReviewDocs.map((doc) => (
+                <li key={doc} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/20 px-2.5 py-1 text-xs font-semibold text-sky-950 dark:text-sky-100">
+                  <span className="h-1.5 w-1.5 rounded-full bg-sky-600" />
+                  {doc} (review)
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
@@ -551,95 +628,27 @@ export function FileActions({
         </>
       )}
 
-      {/* Edit / Resolve Missing Documents Modal */}
+      {/* Edit / Resolve Missing Documents Modal — now powered by per-doc
+          endpoints so each row updates independently and the page reflects
+          the new state without a full reload. Three sections, mirroring
+          the bucket rule in `lib/docStatus.js`:
+            A. Missing documents       → Upload button (signal-blue)
+            B. Documents under review  → Reviewed (primary) + Re-upload (outline)
+            C. Verified documents      → collapsible footer, no actions
+          Auto-clear of the "Routing Blocked" banner on the parent card
+          happens via onResolveSuccess → OfficerDashboard re-fetches
+          selectedFile, which recomputes hasBlockingDocs through the
+          shared helper. */}
       <Modal
         isOpen={isResolveModalOpen}
         onClose={() => setIsResolveModalOpen(false)}
-        title="Resolve Missing Attachments"
-        description={`${missingDocs.length} required document${missingDocs.length > 1 ? 's' : ''} pending verification for ${selectedFile?.title || 'this file'}.`}
+        title="Resolve Attachments"
+        description={`${selectedFile?.title || 'this file'} · ${missingDocs.length} missing · ${needsReviewDocs.length} under review`}
       >
         <div className="space-y-5">
-          {/* Progress Indicator */}
-          <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 font-bold text-sm tabular-nums">
-              {missingDocs.length}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-foreground">Pending document{missingDocs.length > 1 ? 's' : ''}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Upload a scan or photo for each item below to complete verification.</p>
-            </div>
-          </div>
-
-          {/* Document Items */}
-          <div className="space-y-2.5">
-            {missingDocs.map((doc, idx) => (
-              <div key={doc} className="group flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-3.5 transition-colors hover:border-primary/30 hover:bg-primary/[0.02]">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs font-bold tabular-nums">
-                    {idx + 1}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{doc}</p>
-                    <p className="text-[11px] text-muted-foreground">Not uploaded</p>
-                  </div>
-                </div>
-                <label className="flex items-center gap-1.5 cursor-pointer rounded-lg border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 transition-all shrink-0 shadow-xs">
-                  <Icons.Upload className="h-3.5 w-3.5" /> Upload
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleDocFileChangeForItem(doc, file);
-                      e.target.value = '';
-                    }}
-                    disabled={docScanning}
-                  />
-                </label>
-              </div>
-            ))}
-          </div>
-
-          {/* Scan Preview */}
-          {docScanPreview && (
-            <div className="flex items-center gap-4 rounded-xl border border-border bg-muted/20 p-4">
-              <img src={docScanPreview} alt="Scanned attachment" className="h-20 w-20 rounded-xl border border-border bg-white object-cover shadow-sm" />
-              <div className="min-w-0 flex-1">
-                {docScanning ? (
-                  <div className="flex items-center gap-2">
-                    <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-                    <p className="text-xs font-medium text-muted-foreground">Running AI document analysis…</p>
-                  </div>
-                ) : docScanResult ? (
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold text-emerald-600 flex items-center gap-1.5">
-                      <Icons.CheckCircle className="h-4 w-4" /> Scan verified
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      Detected: {docScanResult.documentType || 'Document'} · Confidence: {Math.round((docScanResult.ocrConfidence || 0.9) * 100)}%
-                    </p>
-                    {docScanResult.stampAnalysis?.stampDetected && (
-                      <p className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-600">
-                        <span className={`inline-block h-2 w-2 rounded-full ${
-                          docScanResult.stampAnalysis.stampColor === 'red' ? 'bg-red-500'
-                          : docScanResult.stampAnalysis.stampColor === 'blue' ? 'bg-blue-500'
-                          : 'bg-purple-500'
-                        }`} />
-                        Official {docScanResult.stampAnalysis.stampColor} stamp · {Math.round(docScanResult.stampAnalysis.stampConfidence * 100)}%
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">{docScanError || 'Photo attached — ready for officer verification.'}</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Officer Notes */}
+          {/* Officer Notes — applied to the next per-doc action submit. */}
           <Textarea
-            label="Officer verification notes (optional)"
+            label="Officer notes (optional)"
             id="resolve_notes"
             rows={2}
             placeholder="e.g. Received original physical copy at Reception desk."
@@ -647,13 +656,174 @@ export function FileActions({
             onChange={(e) => setResolveNotes(e.target.value)}
           />
 
-          {/* Actions */}
-          <div className="flex items-center justify-between gap-3 pt-1 border-t border-border">
+          {/* Section A — Missing documents */}
+          {missingDocs.length > 0 && (
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-amber-700 dark:text-amber-300">
+                <Icons.AlertCircle className="h-4 w-4" />
+                Missing ({missingDocs.length})
+              </div>
+              {missingDocs.map((doc) => {
+                const loading = uploadLoadingIdx === `${doc}-upload`;
+                const err = uploadErrorIdx[doc];
+                return (
+                  <div
+                    key={`missing-${doc}`}
+                    className="flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 text-xs font-bold">
+                        !
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-foreground truncate">{doc}</p>
+                        <p className="text-[11px] text-muted-foreground">Not uploaded</p>
+                      </div>
+                      <label
+                        className={`flex items-center gap-1.5 cursor-pointer rounded-lg border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 transition-all shrink-0 shadow-xs ${
+                          loading ? 'opacity-50 pointer-events-none' : ''
+                        }`}
+                      >
+                        <Icons.Upload className="h-3.5 w-3.5" />
+                        {loading ? 'Uploading…' : 'Upload'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handlePerRowUpload(doc, file);
+                            e.target.value = '';
+                          }}
+                          disabled={loading}
+                        />
+                      </label>
+                    </div>
+                    {err && (
+                      <p className="pl-10 text-[11px] font-semibold text-red-600">{err}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Section B — Documents under review */}
+          {needsReviewDocs.length > 0 && (
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-sky-700 dark:text-sky-300">
+                <Icons.Clock className="h-4 w-4" />
+                Under Review ({needsReviewDocs.length})
+              </div>
+              {needsReviewDocs.map((doc) => {
+                const loading = reviewLoadingIdx === `${doc}-reviewed`;
+                const reupLoading = reuploadLoadingIdx === `${doc}-reupload`;
+                const err = reviewErrorIdx[doc] || reuploadErrorIdx[doc];
+                const showOverride = !!reviewOverrideIdx[doc];
+                const overrideChecked = !!reviewOverrideChecked[doc];
+                return (
+                  <div
+                    key={`review-${doc}`}
+                    className="flex flex-col gap-2 rounded-xl border border-sky-500/30 bg-sky-500/5 p-3.5"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sky-700 dark:text-sky-300 text-xs font-bold">
+                        ·
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-foreground truncate">{doc}</p>
+                        <p className="text-[11px] text-muted-foreground">Awaiting officer review</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handlePerRowReviewed(doc)}
+                          disabled={loading || reupLoading || (showOverride && !overrideChecked)}
+                          loading={loading}
+                          className="shadow-sm"
+                        >
+                          <Icons.CheckCircle className="h-3.5 w-3.5" /> Reviewed
+                        </Button>
+                        <label
+                          className={`flex items-center gap-1.5 cursor-pointer rounded-lg border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 transition-all shadow-xs ${
+                            reupLoading ? 'opacity-50 pointer-events-none' : ''
+                          }`}
+                        >
+                          <Icons.RefreshCw className="h-3.5 w-3.5" />
+                          {reupLoading ? '…' : 'Re-upload'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handlePerRowReupload(doc, file);
+                              e.target.value = '';
+                            }}
+                            disabled={reupLoading}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                    {showOverride && (
+                      <label className="flex items-start gap-2 pl-10 text-[11px] text-amber-800 dark:text-amber-200">
+                        <input
+                          type="checkbox"
+                          checked={overrideChecked}
+                          onChange={(e) =>
+                            setReviewOverrideChecked((prev) => ({ ...prev, [doc]: e.target.checked }))
+                          }
+                          className="mt-0.5 h-3.5 w-3.5 rounded border-amber-500/40 text-amber-600 focus:ring-amber-500/30"
+                        />
+                        <span>
+                          <strong className="font-bold">[OFFICER OVERRIDE]</strong> This document has flagged missing keywords. Confirm to mark as verified despite the OCR findings.
+                        </span>
+                      </label>
+                    )}
+                    {err && (
+                      <p className="pl-10 text-[11px] font-semibold text-red-600">{err}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Section C — Verified (collapsible footer, no actions). */}
+          {verifiedCount > 0 && (
+            <details className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+              <summary className="flex cursor-pointer items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+                <Icons.Check className="h-4 w-4" />
+                Verified ({verifiedCount})
+              </summary>
+              <ul className="mt-2 space-y-1 pl-1">
+                {getVerifiedDocs(selectedFile).map((doc) => (
+                  <li
+                    key={`verified-${doc}`}
+                    className="flex items-center gap-2 text-[11px] font-medium text-emerald-800 dark:text-emerald-200"
+                  >
+                    <Icons.Check className="h-3 w-3 text-emerald-600" />
+                    {doc}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {missingDocs.length === 0 && needsReviewDocs.length === 0 && (
+            <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+              <Icons.CheckCircle className="h-5 w-5 text-emerald-600 shrink-0" />
+              <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">
+                All documents verified. Forwarding is now unlocked.
+              </p>
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-3 pt-1 border-t border-border">
             <Button variant="ghost" size="sm" onClick={() => setIsResolveModalOpen(false)} className="text-muted-foreground">
-              Cancel
-            </Button>
-            <Button variant="primary" loading={resolveLoading} onClick={handleConfirmResolve} className="shadow-sm">
-              <Icons.CheckCircle className="h-4 w-4" /> Confirm & Verify All
+              Close
             </Button>
           </div>
         </div>

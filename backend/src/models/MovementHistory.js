@@ -12,6 +12,11 @@ export const ACTION_TYPES = {
   REJECTED: 'Rejected',
   IN_TRANSIT: 'In Transit',
   EDITED: 'Edited',
+  // Used by the per-document action endpoints (upload / reupload / reviewed)
+  // and by resolveMissingDocuments when a previously-incomplete file
+  // completes. Must remain in sync with any string passed as `actionType`
+  // to appendMovementLog — keep this list the single source of truth.
+  DOCUMENT_VERIFIED: 'Document Verified',
 };
 
 const movementHistorySchema = new mongoose.Schema(

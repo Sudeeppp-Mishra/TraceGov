@@ -7,6 +7,14 @@ import {
 } from '../components/ui';
 import { Logo, ThemeToggle } from '../components/layout';
 import { timeAgo } from '../lib/time';
+import {
+  getMissingDocs,
+  getNeedsReviewDocs,
+  getVerifiedDocs,
+  isDocMissing,
+  isDocNeedsReview,
+  isDocVerified,
+} from '../lib/docStatus';
 
 // The QR tag on a file receipt encodes a JSON payload ({ uid, ward/office, ts }).
 // The public track endpoint accepts a file UID as well as a tracking ID, so a
@@ -677,20 +685,31 @@ function NotificationDot({ icon, label, masked, active, count }) {
 }
 
 // Document checklist mini — shows AI verification status of each required doc.
+//
+// Three buckets, three distinct labels (see `lib/docStatus.js`):
+//   verified     → "Verified" (emerald)
+//   needs_review → "Under review" (sky-blue) — the office has the doc, the
+//                  citizen isn't holding anything back
+//   missing/...  → "Not uploaded" (gray) — citizen action still required
+//
+// The previous version reduced every non-verified row to either "Verified",
+// "Needs re-upload", or "Pending" — a status-quo label that conflated the
+// "needs review" and "not uploaded" buckets and told citizens a submitted
+// document was still outstanding.
 function DocumentChecklistMini({ fileDetails }) {
   const verifications = Array.isArray(fileDetails.documentVerifications) ? fileDetails.documentVerifications : [];
   const required = Array.isArray(fileDetails.requiredDocuments) ? fileDetails.requiredDocuments : [];
 
   if (verifications.length === 0 && required.length === 0) return null;
 
-  const verifiedCount = verifications.filter((dv) => dv.status === 'verified').length;
+  const verifiedCount = getVerifiedDocs(fileDetails).length;
   const totalCount = verifications.length || required.length;
   const pct = totalCount > 0 ? Math.round((verifiedCount / totalCount) * 100) : 0;
 
   const rows =
     verifications.length > 0
       ? verifications
-      : required.map((label, idx) => ({ documentLabel: label, status: 'pending', key: idx }));
+      : required.map((label, idx) => ({ documentLabel: label, status: 'not_uploaded', key: idx }));
 
   return (
     <Card>
@@ -715,49 +734,52 @@ function DocumentChecklistMini({ fileDetails }) {
       </div>
       <ul className="space-y-2">
         {rows.map((item, idx) => {
-          const isVerified = item.status === 'verified';
-          const isMissing = item.status === 'missing' || item.status === 'needs-reupload';
+          // Use the shared helper rather than reading `status` directly —
+          // legacy rows pre-dating the per-doc pipeline may carry
+          // `status: 'missing'` or `status: 'needs-reupload'`; the helper
+          // normalises both to the missing bucket.
+          const verified = isDocVerified(item);
+          const review = !verified && isDocNeedsReview(item);
+          const missing = !verified && !review && isDocMissing(item);
           const label = item.documentLabel || item.label;
+
+          let rowTone;
+          let iconBg;
+          let labelColor;
+          let pillText;
+          let Icon;
+
+          if (verified) {
+            rowTone = 'border-emerald-500/30 bg-emerald-500/5';
+            iconBg = 'bg-emerald-500 text-white';
+            labelColor = 'text-emerald-700 dark:text-emerald-400';
+            pillText = 'Verified';
+            Icon = Icons.Check;
+          } else if (review) {
+            rowTone = 'border-sky-500/30 bg-sky-500/5';
+            iconBg = 'bg-sky-500 text-white';
+            labelColor = 'text-sky-700 dark:text-sky-300';
+            pillText = 'Under review';
+            Icon = Icons.Clock;
+          } else {
+            // missing (or anything else the helper maps to missing)
+            rowTone = 'border-amber-500/30 bg-amber-500/5';
+            iconBg = 'bg-amber-500 text-white';
+            labelColor = 'text-amber-700 dark:text-amber-400';
+            pillText = 'Not uploaded';
+            Icon = Icons.AlertCircle;
+          }
+
           return (
             <li
               key={item.id || `${label}-${idx}`}
-              className={`flex items-center gap-3 rounded-xl border px-3.5 py-2.5 transition-colors ${
-                isVerified
-                  ? 'border-emerald-500/30 bg-emerald-500/5'
-                  : isMissing
-                    ? 'border-amber-500/30 bg-amber-500/5'
-                    : 'border-border bg-muted/20'
-              }`}
+              className={`flex items-center gap-3 rounded-xl border px-3.5 py-2.5 transition-colors ${rowTone}`}
             >
-              <span
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-                  isVerified
-                    ? 'bg-emerald-500 text-white'
-                    : isMissing
-                      ? 'bg-amber-500 text-white'
-                      : 'bg-muted text-muted-foreground'
-                }`}
-              >
-                {isVerified ? (
-                  <Icons.Check className="h-3.5 w-3.5" />
-                ) : isMissing ? (
-                  <Icons.AlertCircle className="h-3.5 w-3.5" />
-                ) : (
-                  <Icons.Clock className="h-3.5 w-3.5" />
-                )}
+              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${iconBg}`}>
+                <Icon className="h-3.5 w-3.5" />
               </span>
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{label}</span>
-              <span
-                className={`text-xs font-semibold ${
-                  isVerified
-                    ? 'text-emerald-700 dark:text-emerald-400'
-                    : isMissing
-                      ? 'text-amber-700 dark:text-amber-400'
-                      : 'text-muted-foreground'
-                }`}
-              >
-                {isVerified ? 'Verified' : isMissing ? 'Needs re-upload' : 'Pending'}
-              </span>
+              <span className={`text-xs font-semibold ${labelColor}`}>{pillText}</span>
             </li>
           );
         })}
@@ -776,15 +798,12 @@ function StatusCard({
   isUpdating,
   lastFetchedAt,
 }) {
-  const missingDocs =
-    Array.isArray(fileDetails.documentVerifications) && fileDetails.documentVerifications.length > 0
-      ? fileDetails.documentVerifications
-          .filter((dv) => dv.status !== 'verified')
-          .map((dv) => dv.documentLabel)
-      : fileDetails.missingDocuments ||
-        fileDetails.documentVerification?.missingKeywords ||
-        fileDetails.documentVerification?.missingDocuments ||
-        [];
+  // Use the shared helper so this surface agrees with the registration
+  // banner, the email body, and the Officer's Resolve modal. `needs_review`
+  // docs intentionally don't appear in `missingDocs` — the office already
+  // has them, the citizen isn't holding anything back.
+  const missingDocs = getMissingDocs(fileDetails);
+  const needsReviewDocs = getNeedsReviewDocs(fileDetails);
   const hasMissingDocs =
     missingDocs.length > 0 || fileDetails.verificationStatus === 'missing-documents';
 
@@ -950,6 +969,35 @@ function StatusCard({
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Separate banner for docs already uploaded but pending officer
+            review. Sky-blue distinguishes it from the amber "action
+            required" banner above — this is informational, not a request
+            for the citizen to do anything. */}
+        {needsReviewDocs.length > 0 && (
+          <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-sky-900 dark:text-sky-200">
+              <Icons.Clock className="h-4.5 w-4.5 shrink-0 text-sky-600" />
+              Currently Under Review ({needsReviewDocs.length})
+            </div>
+            <ul className="mt-2.5 space-y-1.5 pl-1">
+              {needsReviewDocs.map((doc) => (
+                <li
+                  key={doc}
+                  className="flex items-center gap-2 text-xs font-semibold text-sky-950 dark:text-sky-100"
+                >
+                  <span className="flex h-4.5 w-4.5 items-center justify-center rounded-full bg-sky-500/20 text-[10px] font-bold text-sky-700 dark:text-sky-300">
+                    ·
+                  </span>
+                  {doc}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] leading-relaxed text-sky-800/80 dark:text-sky-200/80">
+              You have already submitted the above document(s). The office is reviewing them — no action is required from you at this time.
+            </p>
           </div>
         )}
 

@@ -1,11 +1,18 @@
 import mongoose from 'mongoose';
 
 import { generateQrCode } from './qrService.js';
+import { getMissingDocs, getNeedsReviewDocs } from '../utils/docStatus.js';
 
 /**
  * Format HTML & Plaintext Email Templates for TraceGov File Status Updates.
+ *
+ * `missingDocuments` is the citizen-pending list (only docs the citizen still
+ * owes). `needsReviewDocuments` is the office-in-progress list (uploaded but
+ * OCR-flagged or otherwise awaiting officer sign-off). The two are surfaced
+ * as separate visual blocks in the email body so the citizen never confuses
+ * "still need to bring this" with "office is reviewing this".
  */
-export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, status, location, notes, missingDocuments = [], qrDataUrl }) {
+export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, status, location, notes, missingDocuments = [], needsReviewDocuments = [], qrDataUrl }) {
   const origin = process.env.APP_URL || (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',')[0].trim() : 'http://localhost:5173');
   const trackingUrl = `${origin.replace(/\/$/, '')}/track/${trackingId}`;
 
@@ -111,6 +118,29 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
     `
     : '';
 
+  // Separate "under review" block — documents the citizen has already
+  // submitted and the office is currently looking at. Distinct sky-blue tone
+  // (matches the in-app "Currently Under Review" callout) so the citizen
+  // reads it as status information, not as an action item.
+  const hasNeedsReview = Array.isArray(needsReviewDocuments) && needsReviewDocuments.length > 0;
+  const needsReviewListHtml = hasNeedsReview
+    ? `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#EAF1FE; border:1px solid #B6CDFA; border-radius:8px; margin-top:16px; margin-bottom:20px;">
+        <tr>
+          <td style="padding:16px;">
+            <p style="margin:0 0 8px; font-size:14px; font-weight:700; color:#1F4FA8;">🔵 Currently Under Review (${needsReviewDocuments.length}):</p>
+            <ul style="margin:0; padding-left:20px; font-size:13px; color:#1F4FA8;">
+              ${needsReviewDocuments.map((doc) => `<li style="margin-bottom:4px;"><strong>${doc}</strong></li>`).join('')}
+            </ul>
+            <p style="margin:12px 0 0; font-size:12px; color:#2F6FED;">
+              You have already submitted the above document(s). The office is reviewing them — no action is required from you at this time.
+            </p>
+          </td>
+        </tr>
+      </table>
+    `
+    : '';
+
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(fileUid || trackingId)}`;
 
   const qrCodeHtml = `
@@ -168,6 +198,7 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
               </table>
 
               ${missingListHtml}
+              ${needsReviewListHtml}
 
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E8EA; border-radius:8px; margin-bottom:20px;">
                 <tr>
@@ -220,7 +251,7 @@ export function formatEmailTemplate({ citizenName, title, fileUid, trackingId, s
 </html>
   `;
 
-  const textContent = `TraceGov — ${style.headerTitle}\n\n${title} (${fileUid})\nTracking ID: ${trackingId}\nStatus: ${status} at ${location}${hasMissing ? `\n\n⚠️ Remaining Required Document(s):\n- ${missingDocuments.join('\n- ')}\n\nPlease submit the above remaining physical document(s) at your assigned ward office desk.` : ''}${notes ? `\nNote: ${notes}` : ''}\n\nTrack this file: ${trackingUrl}`;
+  const textContent = `TraceGov — ${style.headerTitle}\n\n${title} (${fileUid})\nTracking ID: ${trackingId}\nStatus: ${status} at ${location}${hasMissing ? `\n\n⚠️ Remaining Required Document(s):\n- ${missingDocuments.join('\n- ')}\n\nPlease submit the above remaining physical document(s) at your assigned ward office desk.` : ''}${hasNeedsReview ? `\n\n🔵 Currently Under Review (${needsReviewDocuments.length}):\n- ${needsReviewDocuments.join('\n- ')}\n\nYou have already submitted the above document(s). The office is reviewing them — no action is required from you at this time.` : ''}${notes ? `\nNote: ${notes}` : ''}\n\nTrack this file: ${trackingUrl}`;
 
   return { subject, htmlContent, textContent };
 }
@@ -376,7 +407,13 @@ export async function sendEmailNotification({ file, status, location, notes, mis
     return { success: false, reason: 'missing_email' };
   }
 
-  const missingList = missingDocuments || file.missingDocuments || file.missingKeywords || [];
+  // The persisted `file.missingDocuments`/`missingKeywords` may still contain
+  // `needs_review` labels on legacy files (the pre-helper rule bucket-lumped
+  // them together). Recompute both lists authoritatively from the per-doc
+  // array so the email body cannot lie, regardless of when the file was
+  // registered.
+  const missingList = getMissingDocs(file);
+  const needsReviewList = getNeedsReviewDocs(file);
 
   let qrDataUrl = file.qrDataUrl;
   if (!qrDataUrl && file.fileUid) {
@@ -397,6 +434,7 @@ export async function sendEmailNotification({ file, status, location, notes, mis
     location: location || file.currentLocation,
     notes,
     missingDocuments: missingList,
+    needsReviewDocuments: needsReviewList,
     qrDataUrl,
   });
 

@@ -37,7 +37,14 @@ async function request(path, options = {}) {
     const errorMsg = data.details && Array.isArray(data.details)
       ? data.details.map((d) => d.message).join(', ')
       : data.error;
-    throw new Error(errorMsg || `HTTP error encountered (${response.status})`);
+    // Attach status + raw payload so callers can branch on structured error
+    // bodies (e.g. the 400 `{ needsOverride, missingKeywords }` returned by
+    // the per-doc reviewed endpoint). `error.data` mirrors the fetch
+    // Response.json() payload; `error.status` mirrors Response.status.
+    const err = new Error(errorMsg || `HTTP error encountered (${response.status})`);
+    err.status = response.status;
+    err.data = data;
+    throw err;
   }
 
   return data;
@@ -197,6 +204,30 @@ export const api = {
 
   reOcrDocument: (fileId, idx, payload) =>
     request(`/files/${fileId}/document-verifications/${idx}/re-ocr`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // Per-document officer actions surfaced in the Resolve Attachments modal.
+  // Officer-only — backend returns 403 if `currentUser.role !== 'officer'`.
+  //   upload    — for missing docs (officer uploads on citizen's behalf)
+  //   reupload  — for needs_review docs (officer replaces a flagged scan)
+  //   reviewed  — for needs_review docs (officer manual sign-off; supports
+  //               forceVerified override when missingKeywords remain)
+  uploadDocumentOnBehalf: (fileId, idx, payload) =>
+    request(`/files/${fileId}/document-verifications/${idx}/upload`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  reuploadDocument: (fileId, idx, payload) =>
+    request(`/files/${fileId}/document-verifications/${idx}/reupload`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  reviewDocumentReviewed: (fileId, idx, payload) =>
+    request(`/files/${fileId}/document-verifications/${idx}/reviewed`, {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

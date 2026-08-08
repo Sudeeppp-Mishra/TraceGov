@@ -365,7 +365,23 @@ export default function RegisterFilePage() {
   );
 
   const file = receipt?.file;
-  const receiptMissingDocs = receipt?.missingDocuments || file?.missingDocuments || checklistItems.filter(i => i.status !== 'verified').map(i => i.label);
+  // Per-doc source of truth (see `lib/docStatus.js`): `needs_review` is NOT
+  // citizen-pending. The local checklist is the most accurate source — it
+  // knows the exact per-doc status the officer just submitted. The receipt
+  // and file fallbacks are only used when the local check is empty.
+  const localMissing = checklistItems
+    .filter((i) => i.status === 'not_uploaded' || i.status === 'unverified')
+    .map((i) => i.label);
+  const localNeedsReview = checklistItems.filter((i) => i.status === 'needs_review').map((i) => i.label);
+  const receiptMissingDocs = localMissing.length > 0
+    ? localMissing
+    : (receipt?.missingDocuments || file?.missingDocuments || []);
+  const receiptNeedsReviewDocs = localNeedsReview.length > 0
+    ? localNeedsReview
+    : [];
+  // `isReceiptIncomplete` only counts citizen-pending (missing) docs. A
+  // file with only needs_review rows is complete from the citizen's
+  // perspective — the office is reviewing what they already submitted.
   const isReceiptIncomplete = receipt?.verificationStatus === 'missing-documents' || file?.verificationStatus === 'missing-documents' || receiptMissingDocs.length > 0;
 
   return (
@@ -800,6 +816,29 @@ export default function RegisterFilePage() {
                     </p>
                     <ul className="mt-2.5 list-disc list-inside space-y-1 text-xs font-semibold text-amber-950 dark:text-amber-100">
                       {receiptMissingDocs.map((doc) => (
+                        <li key={doc}><strong>{doc}</strong></li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Separate sky-blue banner for needs_review — the citizen has
+                already submitted these; the office is reviewing them. */}
+            {receiptNeedsReviewDocs.length > 0 && (
+              <div className="no-print mx-auto mb-6 max-w-md rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-left shadow-xs">
+                <div className="flex items-start gap-2.5">
+                  <Icons.Clock className="h-5 w-5 text-sky-600 mt-0.5 shrink-0" />
+                  <div>
+                    <h4 className="text-sm font-bold text-sky-950 dark:text-sky-100">
+                      Awaiting Officer Review ({receiptNeedsReviewDocs.length})
+                    </h4>
+                    <p className="mt-1 text-xs text-sky-900/80 dark:text-sky-200/80 leading-relaxed">
+                      You have already submitted the following document(s). The office is reviewing them — no action is required from you at this time:
+                    </p>
+                    <ul className="mt-2.5 list-disc list-inside space-y-1 text-xs font-semibold text-sky-950 dark:text-sky-100">
+                      {receiptNeedsReviewDocs.map((doc) => (
                         <li key={doc}><strong>{doc}</strong></li>
                       ))}
                     </ul>

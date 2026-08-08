@@ -13,6 +13,7 @@ import statsRoutes from './routes/stats.js';
 import categoryRoutes from './routes/categories.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
 import { secureHeaders } from './middleware/security.js';
+import { requestCounterMiddleware } from './utils/requestCounter.js';
 import { File } from './models/File.js';
 
 // Load environment configuration (Gmail SMTP active)
@@ -111,6 +112,11 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// Rolling request counter — powers the admin "API Throughput" tile with
+// real per-process requests/min instead of a hardcoded constant. Mounted
+// after the rate limiters so a flood of rejected requests isn't counted.
+app.use(requestCounterMiddleware);
 
 // Basic Health Check Endpoint
 app.get('/health', (req, res) => {

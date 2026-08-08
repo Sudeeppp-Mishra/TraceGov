@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../../lib/api';
-import { Button, Card, Icons, Input, Modal, Select, Tabs, Textarea } from '.';
+import { Button, Card, DocumentOcrResult, Icons, Input, Modal, Select, Tabs, Textarea } from '.';
 import {
   getMissingDocs,
   getNeedsReviewDocs,
@@ -60,6 +60,12 @@ export function FileActions({
   // check before the second click goes through with forceVerified:true.
   const [reviewOverrideIdx, setReviewOverrideIdx] = useState({});
   const [reviewOverrideChecked, setReviewOverrideChecked] = useState({});
+  // Per-row OCR feedback after a re-upload. The backend's reuploadDocument
+  // controller already runs the full aiAnalyzeDocument pipeline and writes
+  // every scan field into documentVerifications[idx]; we thread the response
+  // through here so the officer sees the same OCR panel as on the Register
+  // page, without scrolling to the separate "AI Scan Detail" section.
+  const [reuploadResultByLabel, setReuploadResultByLabel] = useState({});
 
   const isScanVerified = scannedVia === 'webcam' || scannedVia === 'mobile';
 
@@ -203,6 +209,10 @@ export function FileActions({
   };
 
   // Per-row handler: officer replaces a needs_review scan with a new photo.
+  // The backend runs the full aiAnalyzeDocument pipeline; the response
+  // includes the updated documentVerification, which we surface inline via
+  // the shared DocumentOcrResult panel so the officer reads the same OCR
+  // feedback they see on the Register page.
   const handlePerRowReupload = async (docLabel, file) => {
     if (!file || !file.type.startsWith('image/')) return;
     const fileId = selectedFile?.id || selectedFile?._id;
@@ -221,11 +231,17 @@ export function FileActions({
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      await api.reuploadDocument(fileId, idx, {
+      const res = await api.reuploadDocument(fileId, idx, {
         imageBase64: base64,
         scannedVia: 'manual',
         notes: resolveNotes.trim() || undefined,
       });
+      // Thread the OCR result back into per-row state so the officer can
+      // see exactly what the AI returned for this scan — extracted text,
+      // completeness %, stamp analysis, name match, etc.
+      if (res?.documentVerification) {
+        setReuploadResultByLabel((prev) => ({ ...prev, [docLabel]: res.documentVerification }));
+      }
       if (onResolveSuccess) onResolveSuccess();
     } catch (err) {
       setReuploadErrorIdx((prev) => ({ ...prev, [docLabel]: err.message || 'Re-upload failed.' }));
@@ -254,9 +270,16 @@ export function FileActions({
         notes: resolveNotes.trim() || undefined,
         forceVerified,
       });
-      // Clear the override flag once the call succeeded.
+      // Clear the override flag and any cached OCR card once the call
+      // succeeded — the row is leaving the "Under Review" section.
       setReviewOverrideChecked((prev) => ({ ...prev, [docLabel]: false }));
       setReviewOverrideIdx((prev) => ({ ...prev, [docLabel]: false }));
+      setReuploadResultByLabel((prev) => {
+        if (!(docLabel in prev)) return prev;
+        const next = { ...prev };
+        delete next[docLabel];
+        return next;
+      });
       if (onResolveSuccess) onResolveSuccess();
     } catch (err) {
       // Backend returns 400 with `{ needsOverride: true, missingKeywords }`
@@ -269,6 +292,18 @@ export function FileActions({
           ...prev,
           [docLabel]: `Document has flagged keywords: ${(data.missingKeywords || []).join(', ')}`,
         }));
+      } else if (err?.status === 400 || err?.status === 409) {
+        // Stale index (server-side `documentVerifications[]` shrank since
+        // the modal opened), or some other validation/state error. Surface
+        // the actual server message instead of "Review failed.", and
+        // refetch the file so the row list stays in sync — clicking the
+        // same button again against a fresh index usually resolves it.
+        const msg = data?.error || err.message || 'Review failed.';
+        setReviewErrorIdx((prev) => ({ ...prev, [docLabel]: `${msg} — refreshing file state.` }));
+        // Reset override flag — it's no longer meaningful against a stale row.
+        setReviewOverrideChecked((prev) => ({ ...prev, [docLabel]: false }));
+        setReviewOverrideIdx((prev) => ({ ...prev, [docLabel]: false }));
+        if (onResolveSuccess) onResolveSuccess();
       } else {
         setReviewErrorIdx((prev) => ({ ...prev, [docLabel]: err.message || 'Review failed.' }));
       }
@@ -340,7 +375,9 @@ export function FileActions({
         <div className="flex items-center gap-2">
           {isScanVerified ? (
             <>
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white font-bold">✓</span>
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white">
+                <Icons.Check className="h-3.5 w-3.5" />
+              </span>
               <div>
                 <strong className="font-bold">QR Scan Verified ({scannedVia})</strong>
                 <p className="text-[11px] opacity-80">Physical envelope verified at desk desk log.</p>
@@ -672,8 +709,8 @@ export function FileActions({
                     className="flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3.5"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300 text-xs font-bold">
-                        !
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                        <Icons.FileText className="h-4 w-4" />
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-foreground truncate">{doc}</p>
@@ -727,8 +764,8 @@ export function FileActions({
                     className="flex flex-col gap-2 rounded-xl border border-sky-500/30 bg-sky-500/5 p-3.5"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sky-700 dark:text-sky-300 text-xs font-bold">
-                        ·
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sky-700 dark:text-sky-300">
+                        <Icons.Clock className="h-4 w-4" />
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-foreground truncate">{doc}</p>
@@ -783,6 +820,46 @@ export function FileActions({
                     )}
                     {err && (
                       <p className="pl-10 text-[11px] font-semibold text-red-600">{err}</p>
+                    )}
+                    {/* Inline OCR feedback for the latest re-upload on this
+                        row. Same component the Register page uses, so the
+                        officer reads identical OCR output here as anywhere
+                        else in the app — no need to scroll to the separate
+                        "AI Scan Detail" section to see what changed. */}
+                    {reuploadResultByLabel[doc] && (
+                      <div className="pl-10">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <p className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-sky-700 dark:text-sky-300">
+                            <Icons.Sparkles className="h-3.5 w-3.5" />
+                            Latest OCR scan
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setReuploadResultByLabel((prev) => {
+                                const next = { ...prev };
+                                delete next[doc];
+                                return next;
+                              })
+                            }
+                            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-red-500 transition-colors cursor-pointer"
+                            title="Dismiss OCR result"
+                          >
+                            <Icons.X className="h-3 w-3" />
+                            Dismiss
+                          </button>
+                        </div>
+                        <DocumentOcrResult
+                          scanResult={reuploadResultByLabel[doc]}
+                          documentLabel={doc}
+                          imagePreview={
+                            reuploadResultByLabel[doc].imagePreviews?.[0] ||
+                            reuploadResultByLabel[doc].imagePreview
+                          }
+                          pagePreviews={reuploadResultByLabel[doc].imagePreviews || []}
+                          compact
+                        />
+                      </div>
                     )}
                   </div>
                 );

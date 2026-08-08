@@ -120,8 +120,8 @@ function HeroPreview() {
           {steps.map((s, i) => (
             <div key={s.label} className="text-left">
               <div className="flex items-center gap-1">
-                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${s.done ? 'bg-emerald-500 text-white' : s.active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
-                  {s.done ? '✓' : i + 1}
+                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${s.done ? 'bg-emerald-500 text-white' : s.active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                  {s.done ? <Icons.Check className="h-3.5 w-3.5" /> : i + 1}
                 </span>
                 {i < steps.length - 1 && <span className={`h-0.5 flex-1 rounded ${s.done ? 'bg-emerald-500' : 'bg-border'}`} />}
               </div>

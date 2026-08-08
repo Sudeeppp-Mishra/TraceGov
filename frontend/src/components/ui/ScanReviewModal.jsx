@@ -120,14 +120,14 @@ function confidenceTierClass(c) {
   return 'border-red-500 bg-red-500/15';
 }
 
-// Per-word script emoji for overlay tooltips. Tier-3 #16 — when the AI
+// Per-word script label for overlay tooltips. Tier-3 #16 — when the AI
 // service tagged each word with a language, officers can see at a glance
-// which script each detected word belongs to (e.g. 🇳🇵 on a Devanagari
-// word, 🇬🇧 on a Latin word in the same line).
+// which script each detected word belongs to (e.g. "NE" on a Devanagari
+// word, "EN" on a Latin word in the same line).
 function languageFlag(language) {
-  if (language === 'ne') return '🇳🇵';
-  if (language === 'en') return '🇬🇧';
-  if (language === 'mixed') return '🌐';
+  if (language === 'ne') return 'NE';
+  if (language === 'en') return 'EN';
+  if (language === 'mixed') return 'Mix';
   return '';
 }
 
@@ -501,7 +501,7 @@ export function ScanReviewModal({
                   <div className="rounded-lg border border-border bg-card p-3">
                     <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       <span className="inline-flex items-center gap-1.5">
-                        <span aria-hidden="true">🇳🇵</span> Nepali
+                        <Icons.Globe className="h-3 w-3 text-muted-foreground" aria-hidden="true" /> Nepali
                       </span>
                       <span>{activeNe.length.toLocaleString()} chars</span>
                     </div>
@@ -530,7 +530,7 @@ export function ScanReviewModal({
                   <div className="rounded-lg border border-border bg-card p-3">
                     <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       <span className="inline-flex items-center gap-1.5">
-                        <span aria-hidden="true">🇬🇧</span> English
+                        <Icons.Globe className="h-3 w-3 text-muted-foreground" aria-hidden="true" /> English
                       </span>
                       <span>{activeEn.length.toLocaleString()} chars</span>
                     </div>

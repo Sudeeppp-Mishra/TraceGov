@@ -864,6 +864,7 @@ export const Icons = {
   BarChart: mk(<path d="M4 20V10M10 20V4M16 20v-6M22 20H2" />),
   Globe: mk(<><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.5 4 6 4 9s-1.5 6.5-4 9c-2.5-2.5-4-6-4-9s1.5-6.5 4-9z" /></>),
   Phone: mk(<path d="M5 4h4l2 5-3 2a12 12 0 005 5l2-3 5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2z" />),
+  Mail: mk(<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></>),
   Menu: mk(<path d="M4 6h16M4 12h16M4 18h16" />),
   X: mk(<path d="M6 18L18 6M6 6l12 12" />),
   Sun: mk(<><circle cx="12" cy="12" r="4.5" /><path d="M12 2v2m0 16v2M4 12H2m20 0h-2M5.6 5.6L4.2 4.2m15.6 1.4l1.4-1.4M5.6 18.4l-1.4 1.4m15.6-1.4l1.4 1.4" /></>),
@@ -894,3 +895,4 @@ export { ExtractedTextModal } from './ExtractedTextModal';
 export { StampOverlayImage } from './StampOverlayImage';
 export { ScanReviewModal } from './ScanReviewModal';
 export { EditFileModal } from './EditFileModal';
+export { DocumentOcrResult } from './DocumentOcrResult';

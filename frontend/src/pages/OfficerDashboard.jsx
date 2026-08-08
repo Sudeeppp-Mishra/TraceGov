@@ -5,6 +5,8 @@ import {
   Container, Card, Button, Input, Badge, Icons,
   StatCard, Skeleton, EmptyState, Timeline, TimelineItem, useToast,
   QrScanner, FileActions, EditFileModal,
+  ScanReviewModal,
+  StampOverlayImage,
 } from '../components/ui';
 import { AppShell, PageHeading } from '../components/layout';
 
@@ -105,8 +107,8 @@ export default function OfficerDashboard() {
       // position; only swaps the edited fields + assignedOfficer populate).
       setSelectedFile((prev) => ({ ...prev, ...res.file, id: prev.id }));
       const changeCount = Array.isArray(res.changes) ? res.changes.length : 0;
-      const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
-      const smsMsg = res?.smsNotified ? ' 📱 SMS alert sent.' : '';
+      const emailMsg = res?.emailNotified ? ' Email alert sent.' : '';
+      const smsMsg = res?.smsNotified ? ' SMS alert sent.' : '';
       if (changeCount === 0) {
         toast.info('No fields actually changed — saved to ledger for audit.');
       } else {
@@ -225,8 +227,8 @@ export default function OfficerDashboard() {
         nextStatus: targetStatus,
         notes,
       });
-      const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
-      const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
+      const emailMsg = res?.emailNotified ? ' Email alert sent.' : '';
+      const smsMsg = res?.smsNotified ? ' SMS alert logged.' : '';
       toast.success(`File transferred to ${targetLoc}.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid, actionScannedVia);
@@ -243,8 +245,8 @@ export default function OfficerDashboard() {
         backtrackReason: reason,
         internalNotes: intNotes,
       });
-      const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
-      const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
+      const emailMsg = res?.emailNotified ? ' Email alert sent.' : '';
+      const smsMsg = res?.smsNotified ? ' SMS alert logged.' : '';
       toast.success(`File returned to ${targetLoc}.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid, actionScannedVia);
@@ -263,8 +265,8 @@ export default function OfficerDashboard() {
         remarks,
         manualReason: remarks,
       });
-      const emailMsg = res?.emailNotified ? ' 📧 Email alert sent.' : '';
-      const smsMsg = res?.smsNotified ? ' 📱 SMS alert logged.' : '';
+      const emailMsg = res?.emailNotified ? ' Email alert sent.' : '';
+      const smsMsg = res?.smsNotified ? ' SMS alert logged.' : '';
       toast.success(`Physical receipt confirmed. File received into queue.${emailMsg}${smsMsg}`);
       await loadDashboard(currentUser.wardCode);
       await handleSelectFile(selectedFile.fileUid, actionScannedVia);

@@ -92,7 +92,7 @@ export function ExtractedTextModal({
             <div className="rounded-xl border border-border bg-muted/20 p-2">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                  <span aria-hidden="true">🇳🇵</span>
+                  <Icons.Globe className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                   Nepali
                   <span className="text-muted-foreground font-normal">
                     ({nepaliText.length.toLocaleString()} chars)
@@ -115,7 +115,7 @@ export function ExtractedTextModal({
             <div className="rounded-xl border border-border bg-muted/20 p-2">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                  <span aria-hidden="true">🇬🇧</span>
+                  <Icons.Globe className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                   English
                   <span className="text-muted-foreground font-normal">
                     ({englishText.length.toLocaleString()} chars)

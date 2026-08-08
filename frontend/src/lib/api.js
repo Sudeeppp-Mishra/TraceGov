@@ -262,6 +262,19 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return request(`/stats/weekly${qs ? `?${qs}` : ''}`);
   },
+
+  // Admin-only: live CPU / RAM / DB / API throughput metrics for the
+  // "System Resource Metrics" tiles. Returns null fields instead of
+  // 500ing so the dashboard can keep showing "—" if DB stats are
+  // temporarily unavailable.
+  getAdminInfraMetrics: () => request('/stats/admin/infra-metrics'),
+
+  // Admin-only: aggregated analytics for the dashboard's new visuals.
+  // `range` is '7d' | '30d'; `allWards` defaults to 'true' for admins.
+  getAdminAnalytics: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/stats/admin/analytics${qs ? `?${qs}` : ''}`);
+  },
 };
 
 // --- Session Cache Helpers ---

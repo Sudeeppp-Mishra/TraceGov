@@ -8,6 +8,18 @@ import {
 } from '../components/ui';
 import { AppShell, PageHeading } from '../components/layout';
 
+const formatBytes = (bytes) => {
+  if (bytes == null || Number.isNaN(bytes)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  let v = bytes;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(v >= 100 || i === 0 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
+};
+
 export default function AdminDashboard() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -32,6 +44,25 @@ export default function AdminDashboard() {
     aiLatencyMs: 1420,
     apiLatencyMs: 12,
   });
+
+  // Live infrastructure metrics (CPU / RAM / DB / API throughput)
+  const [infraMetrics, setInfraMetrics] = useState({
+    cpuPercent: null,
+    cpuCores: null,
+    rssBytes: null,
+    heapUsedBytes: null,
+    heapTotalBytes: null,
+    dbStorageBytes: null,
+    dbStorageObjects: null,
+    throughputRpm: null,
+    sampleWindowSec: 60,
+    capturedAt: null,
+  });
+
+  // Admin analytics — aggregated view powering the new tiles. Polled every
+  // 60s so the dashboard feels live without thrashing the DB.
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsRange, setAnalyticsRange] = useState('7d'); // '7d' | '30d'
 
   // Diagnostics Loading States
   const [pingingDb, setPingingDb] = useState(false);
@@ -103,6 +134,14 @@ export default function AdminDashboard() {
     setCurrentUser(user);
     loadAdministration(user.wardCode);
     checkServicesHealth();
+    loadInfraMetrics();
+    loadAnalytics();
+    const infraInterval = setInterval(loadInfraMetrics, 15000);
+    const analyticsInterval = setInterval(loadAnalytics, 60000);
+    return () => {
+      clearInterval(infraInterval);
+      clearInterval(analyticsInterval);
+    };
   }, [navigate]);
 
   const loadAdministration = async (wardCode) => {
@@ -164,6 +203,47 @@ export default function AdminDashboard() {
       setLoading(false);
     }
   };
+
+  const loadInfraMetrics = async () => {
+    try {
+      const res = await api.getAdminInfraMetrics();
+      if (res) {
+        setInfraMetrics({
+          cpuPercent: res.cpuPercent,
+          cpuCores: res.cpuCores,
+          rssBytes: res.rssBytes,
+          heapUsedBytes: res.heapUsedBytes,
+          heapTotalBytes: res.heapTotalBytes,
+          dbStorageBytes: res.dbStorageBytes,
+          dbStorageObjects: res.dbStorageObjects,
+          throughputRpm: res.throughputRpm,
+          sampleWindowSec: res.sampleWindowSec || 60,
+          capturedAt: res.capturedAt,
+        });
+      }
+    } catch (err) {
+      // Silent failure — keep last-known values on screen so the dashboard
+      // doesn't blink to "—" every 15s if the endpoint is briefly unavailable.
+      console.warn('[ADMIN] Failed to load infra metrics:', err?.message || err);
+    }
+  };
+
+  const loadAnalytics = async () => {
+    try {
+      const res = await api.getAdminAnalytics({ range: analyticsRange, allWards: 'true' });
+      if (res) setAnalytics(res);
+    } catch (err) {
+      console.warn('[ADMIN] Failed to load analytics:', err?.message || err);
+    }
+  };
+
+  // Re-fetch analytics whenever the user flips the 7d/30d toggle.
+  useEffect(() => {
+    if (currentUser) loadAnalytics();
+    // analyticsRange is the dep; intentionally exclude currentUser so we
+    // don't double-fetch on the initial mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsRange]);
 
   const checkServicesHealth = async () => {
     const t0 = performance.now();
@@ -540,10 +620,91 @@ export default function AdminDashboard() {
 
   const activeTrafficData = timeRange === '7d' ? weeklyTraffic : hourlyTraffic;
 
+  // ── New analytics derived data ──
+  const filesPerDeskList = useMemo(() => {
+    const rows = analytics?.filesPerDesk || [];
+    if (rows.length === 0) return [];
+    return rows.map((d) => ({
+      label: d.desk,
+      value: d.count,
+      tone: 'emerald',
+    }));
+  }, [analytics]);
+
+  // Bottleneck detector: highlight the desk with the longest avg dwell
+  // time in amber so the admin can spot the slowest station at a glance.
+  const avgTimeInDeskList = useMemo(() => {
+    const rows = analytics?.avgTimeInDeskHours || [];
+    if (rows.length === 0) return [];
+    const maxHours = rows[0]?.avgHours || 0;
+    return rows.map((d, idx) => ({
+      label: `${d.desk}${d.sampleCount ? ` (n=${d.sampleCount})` : ''}`,
+      value: d.avgHours,
+      tone: idx === 0 && maxHours > 0 ? 'amber' : 'emerald',
+    }));
+  }, [analytics]);
+
+  const officerWorkloadList = useMemo(() => {
+    const rows = analytics?.officerWorkload || [];
+    if (rows.length === 0) return [];
+    return rows.map((o) => ({
+      label: `${o.name}${o.desk ? ` · ${o.desk}` : ''}`,
+      value: o.openFiles,
+      tone: o.openFiles > 5 ? 'amber' : 'emerald',
+    }));
+  }, [analytics]);
+
+  const dailyRegistrationArea = useMemo(() => {
+    return analytics?.dailyRegistration || [];
+  }, [analytics]);
+
+  const blockedBreakdown = analytics?.blockedBreakdown;
+
+  const reviewTurnaroundLabel = useMemo(() => {
+    const hrs = analytics?.reviewTurnaroundHours;
+    if (hrs == null) return '—';
+    if (hrs < 1) return `${Math.round(hrs * 60)} min`;
+    if (hrs < 24) return `${hrs.toFixed(1)} hrs`;
+    return `${(hrs / 24).toFixed(1)} days`;
+  }, [analytics]);
+
   const filteredLogs = useMemo(() => {
     if (logFilter === 'ALL') return systemAuditLogs;
     return systemAuditLogs.filter((l) => l.type === logFilter);
   }, [systemAuditLogs, logFilter]);
+
+  // Live infrastructure derived strings — falls back to "—" while loading.
+  const cpuLabel = useMemo(() => {
+    if (infraMetrics.cpuPercent == null) return '—';
+    return `${Math.round(infraMetrics.cpuPercent)}%`;
+  }, [infraMetrics.cpuPercent]);
+
+  const ramLabel = useMemo(() => {
+    if (infraMetrics.rssBytes == null) return '—';
+    return formatBytes(infraMetrics.rssBytes);
+  }, [infraMetrics.rssBytes]);
+
+  const ramSubLabel = useMemo(() => {
+    if (infraMetrics.heapUsedBytes == null || infraMetrics.heapTotalBytes == null) {
+      return 'Heap pending…';
+    }
+    return `Heap ${formatBytes(infraMetrics.heapUsedBytes)} / ${formatBytes(infraMetrics.heapTotalBytes)}`;
+  }, [infraMetrics.heapUsedBytes, infraMetrics.heapTotalBytes]);
+
+  const dbLabel = useMemo(() => {
+    if (infraMetrics.dbStorageBytes == null) return '—';
+    return formatBytes(infraMetrics.dbStorageBytes);
+  }, [infraMetrics.dbStorageBytes]);
+
+  const dbSubLabel = useMemo(() => {
+    if (infraMetrics.dbStorageObjects == null) return 'Encrypted MongoDB';
+    return `${infraMetrics.dbStorageObjects.toLocaleString()} documents`;
+  }, [infraMetrics.dbStorageObjects]);
+
+  const apiLabel = useMemo(() => {
+    if (infraMetrics.throughputRpm == null) return '—';
+    return `${infraMetrics.throughputRpm} req/min`;
+  }, [infraMetrics.throughputRpm]);
 
   const TABS = [
     { id: 'overview', label: 'Infrastructure & Controls', icon: Icons.Shield },
@@ -741,13 +902,17 @@ export default function AdminDashboard() {
                   </Card>
                 </div>
 
-                {/* System Resource Metrics Grid */}
+                {/* System Resource Metrics Grid — all live from /admin/infra-metrics */}
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <Card className="p-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">CPU Core Load</p>
-                      <p className="mt-1 text-2xl font-bold text-foreground">18%</p>
-                      <p className="text-[11px] text-emerald-500 font-medium mt-0.5">Optimal performance</p>
+                      <p className="mt-1 text-2xl font-bold text-foreground">{cpuLabel}</p>
+                      <p className="text-[11px] text-emerald-500 font-medium mt-0.5">
+                        {infraMetrics.cpuCores
+                          ? `Across ${infraMetrics.cpuCores} core${infraMetrics.cpuCores === 1 ? '' : 's'}`
+                          : 'Optimal performance'}
+                      </p>
                     </div>
                     <div className="h-10 w-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
                       <Icons.Zap className="h-5 w-5" />
@@ -757,8 +922,8 @@ export default function AdminDashboard() {
                   <Card className="p-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">RAM Memory Used</p>
-                      <p className="mt-1 text-2xl font-bold text-foreground">342 MB</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">Of 2.0 GB allocated</p>
+                      <p className="mt-1 text-2xl font-bold text-foreground">{ramLabel}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{ramSubLabel}</p>
                     </div>
                     <div className="h-10 w-10 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
                       <Icons.Server className="h-5 w-5" />
@@ -768,8 +933,8 @@ export default function AdminDashboard() {
                   <Card className="p-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Database Storage</p>
-                      <p className="mt-1 text-2xl font-bold text-foreground">1.4 GB</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">Encrypted MongoDB</p>
+                      <p className="mt-1 text-2xl font-bold text-foreground">{dbLabel}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{dbSubLabel}</p>
                     </div>
                     <div className="h-10 w-10 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
                       <Icons.Database className="h-5 w-5" />
@@ -779,8 +944,12 @@ export default function AdminDashboard() {
                   <Card className="p-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">API Throughput</p>
-                      <p className="mt-1 text-2xl font-bold text-foreground">42 req/min</p>
-                      <p className="text-[11px] text-emerald-500 font-medium mt-0.5">Low latency</p>
+                      <p className="mt-1 text-2xl font-bold text-foreground">{apiLabel}</p>
+                      <p className="text-[11px] text-emerald-500 font-medium mt-0.5">
+                        {infraMetrics.sampleWindowSec
+                          ? `Rolling ${infraMetrics.sampleWindowSec}s window`
+                          : 'Live request counter'}
+                      </p>
                     </div>
                     <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
                       <Icons.TrendingUp className="h-5 w-5" />
@@ -946,6 +1115,188 @@ export default function AdminDashboard() {
                     )}
                   </Card>
                 </div>
+
+                {/* ── New aggregated analytics ── */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                      Operational Analytics
+                    </h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Live aggregates from the files and movement ledgers.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setAnalyticsRange('7d')}
+                      className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                        analyticsRange === '7d' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+                      }`}
+                    >
+                      7 Days
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAnalyticsRange('30d')}
+                      className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                        analyticsRange === '30d' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+                      }`}
+                    >
+                      30 Days
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <Card className="p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Files Registered</p>
+                    <p className="mt-1 text-2xl font-bold text-foreground">
+                      {dailyRegistrationArea.reduce((s, d) => s + (d.count || 0), 0)}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Past {analyticsRange === '30d' ? '30 days' : '7 days'}
+                    </p>
+                  </Card>
+                  <Card className="p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Blocked Files</p>
+                    <p className="mt-1 text-2xl font-bold text-foreground">
+                      {blockedBreakdown?.blockedFiles ?? '—'}
+                    </p>
+                    <p className="text-[11px] text-amber-500 font-medium mt-0.5">
+                      Awaiting citizen or office action
+                    </p>
+                  </Card>
+                  <Card className="p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Review Turnaround</p>
+                    <p className="mt-1 text-2xl font-bold text-foreground">{reviewTurnaroundLabel}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      needs_review → verified
+                    </p>
+                  </Card>
+                  <Card className="p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bottleneck Desk</p>
+                    <p className="mt-1 text-base font-bold text-foreground truncate">
+                      {avgTimeInDeskList[0]?.label?.split(' (')[0] || '—'}
+                    </p>
+                    <p className="text-[11px] text-amber-500 font-medium mt-0.5">
+                      Longest avg dwell time
+                    </p>
+                  </Card>
+                </div>
+
+                <div className="grid gap-6 lg:grid-cols-2">
+                  {/* Files processed per desk */}
+                  <Card>
+                    <div className="mb-5 flex items-center gap-2">
+                      <Icons.Layers className="h-4.5 w-4.5 text-primary" />
+                      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        Files Processed per Desk
+                      </h3>
+                    </div>
+                    {filesPerDeskList.length > 0 ? (
+                      <BarList data={filesPerDeskList} valueFormat={(v) => `${v} file${v === 1 ? '' : 's'}`} />
+                    ) : (
+                      <EmptyState
+                        icon={<Icons.Layers className="h-6 w-6" />}
+                        title="No movement data"
+                        description="Files will appear here as officers action them."
+                      />
+                    )}
+                  </Card>
+
+                  {/* Average time-in-desk (bottleneck detector) */}
+                  <Card>
+                    <div className="mb-5 flex items-center gap-2">
+                      <Icons.Clock className="h-4.5 w-4.5 text-primary" />
+                      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        Average Time-in-Desk (Bottleneck Detector)
+                      </h3>
+                    </div>
+                    {avgTimeInDeskList.length > 0 ? (
+                      <BarList data={avgTimeInDeskList} valueFormat={(v) => `${v} hrs`} />
+                    ) : (
+                      <EmptyState
+                        icon={<Icons.Clock className="h-6 w-6" />}
+                        title="No dwell-time data"
+                        description="Desks will appear here once files move between them."
+                      />
+                    )}
+                  </Card>
+                </div>
+
+                <div className="grid gap-6 lg:grid-cols-2">
+                  {/* Officer workload (open files currently assigned) */}
+                  <Card>
+                    <div className="mb-5 flex items-center gap-2">
+                      <Icons.Users className="h-4.5 w-4.5 text-primary" />
+                      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        Officer Workload (Open Files Assigned)
+                      </h3>
+                    </div>
+                    {officerWorkloadList.length > 0 ? (
+                      <BarList data={officerWorkloadList} valueFormat={(v) => `${v} file${v === 1 ? '' : 's'}`} />
+                    ) : (
+                      <EmptyState
+                        icon={<Icons.Users className="h-6 w-6" />}
+                        title="No officers assigned"
+                        description="Assign officers to files to see workload."
+                      />
+                    )}
+                  </Card>
+
+                  {/* Daily registration volume trend */}
+                  <Card>
+                    <div className="mb-4 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Icons.TrendingUp className="h-4.5 w-4.5 text-primary" />
+                        <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                          Daily File Registration Volume
+                        </h3>
+                      </div>
+                    </div>
+                    {dailyRegistrationArea.length > 0 ? (
+                      <AreaChart data={dailyRegistrationArea} height={170} />
+                    ) : (
+                      <EmptyState
+                        icon={<Icons.FileText className="h-6 w-6" />}
+                        title="No registrations yet"
+                        description="New files will appear in this trend."
+                      />
+                    )}
+                  </Card>
+                </div>
+
+                {/* Blocked-files breakdown */}
+                {blockedBreakdown && (
+                  <Card>
+                    <div className="mb-4 flex items-center gap-2">
+                      <Icons.AlertCircle className="h-4.5 w-4.5 text-amber-500" />
+                      <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        Blocked-Files Breakdown (Ward-wide)
+                      </h3>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <div className="rounded-xl border border-border bg-muted/30 p-4">
+                        <p className="text-xs font-semibold text-muted-foreground">Missing Documents</p>
+                        <p className="mt-1 text-2xl font-bold text-foreground">{blockedBreakdown.missingRows}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">Per-doc rows awaiting citizen upload</p>
+                      </div>
+                      <div className="rounded-xl border border-border bg-muted/30 p-4">
+                        <p className="text-xs font-semibold text-muted-foreground">Needs Review</p>
+                        <p className="mt-1 text-2xl font-bold text-foreground">{blockedBreakdown.needsReviewRows}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">Per-doc rows awaiting officer review</p>
+                      </div>
+                      <div className="rounded-xl border border-border bg-muted/30 p-4">
+                        <p className="text-xs font-semibold text-muted-foreground">Blocked Files</p>
+                        <p className="mt-1 text-2xl font-bold text-foreground">{blockedBreakdown.blockedFiles}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          of {blockedBreakdown.totalFiles} open files
+                        </p>
+                      </div>
+                    </div>
+                  </Card>
+                )}
               </div>
             )}
 
@@ -954,8 +1305,8 @@ export default function AdminDashboard() {
               <Card className="space-y-6">
                 <div className="flex items-center justify-between border-b border-border pb-4">
                   <div className="flex items-center gap-2">
-                    <Icons.Globe className="h-5 w-5 text-primary" />
-                    <h3 className="text-base font-bold text-foreground">Municipal Ward Infrastructure Settings</h3>
+                        <Icons.Globe className="h-5 w-5 text-primary" />
+                        <h3 className="text-base font-bold text-foreground">Municipal Ward Infrastructure Settings</h3>
                   </div>
                   <Chip>Ward Node: {wardConfig.wardCode}</Chip>
                 </div>

@@ -1641,7 +1641,11 @@ export async function uploadDocumentOnBehalf(req, res, next) {
     const missingKeywords = Array.isArray(result.missingKeywords) ? result.missingKeywords : [];
 
     file.documentVerifications[idxNum] = {
-      ...dv,
+      // `dv` is a Mongoose EmbeddedDocument; its data fields are non-enumerable
+      // so `{ ...dv }` produces an empty object and the schema's
+      // `documentLabel: required` validator fails on save. Use toObject()
+      // to flatten every persisted field onto a plain object.
+      ...(typeof dv.toObject === 'function' ? dv.toObject() : { ...dv }),
       documentLabel: documentLabel || dv.documentLabel || 'Attachment',
       imagePreview: imageBase64.slice(0, 2_000_000),
       imagePreviews: [imageBase64.slice(0, 2_000_000)],
@@ -1776,7 +1780,11 @@ export async function reuploadDocument(req, res, next) {
     const missingKeywords = Array.isArray(result.missingKeywords) ? result.missingKeywords : [];
 
     file.documentVerifications[idxNum] = {
-      ...dv,
+      // `dv` is a Mongoose EmbeddedDocument; its data fields are non-enumerable
+      // so `{ ...dv }` produces an empty object and the schema's
+      // `documentLabel: required` validator fails on save. Use toObject()
+      // to flatten every persisted field onto a plain object.
+      ...(typeof dv.toObject === 'function' ? dv.toObject() : { ...dv }),
       imagePreview: imageBase64.slice(0, 2_000_000),
       imagePreviews: [imageBase64.slice(0, 2_000_000)],
       scannedAt: new Date(),
@@ -1888,7 +1896,12 @@ export async function reviewDocumentReviewed(req, res, next) {
     }
 
     file.documentVerifications[idxNum] = {
-      ...dv,
+      // `dv` is a Mongoose EmbeddedDocument; its data fields are non-enumerable
+      // so `{ ...dv }` produces an empty object. Using `toObject()` flattens
+      // every persisted field onto a plain object — otherwise the schema's
+      // `documentLabel: required` validator fails on save and the "Reviewed"
+      // click 400s with "Data validation failed".
+      ...(typeof dv.toObject === 'function' ? dv.toObject() : { ...dv }),
       status: 'verified',
       missingKeywords: [],
       isQualityPassed: true,

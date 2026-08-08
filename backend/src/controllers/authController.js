@@ -1,6 +1,8 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
 import { User, ROLES } from '../models/User.js';
+import { MovementHistory } from '../models/MovementHistory.js';
 
 /**
  * Register a new Officer/Admin account.
@@ -138,12 +140,19 @@ export async function deleteOfficer(req, res, next) {
   try {
     const { id } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      console.warn(`[DELETE OFFICER] Invalid ObjectId received: "${id}" from admin ${req.user._id} (ward ${req.user.wardCode})`);
+      return res.status(404).json({ success: false, error: 'Officer not found' });
+    }
+
     if (String(req.user._id) === String(id)) {
       return res.status(400).json({ success: false, error: 'You cannot remove your own account.' });
     }
 
-    const officer = await User.findOne({ _id: id, wardCode: req.user.wardCode });
+    // Match getOfficers behavior: cross-ward visibility for admins, no wardCode filter.
+    const officer = await User.findOne({ _id: id });
     if (!officer) {
+      console.warn(`[DELETE OFFICER] No officer matches id "${id}" — admin ${req.user._id} (ward ${req.user.wardCode}) tried to remove someone who no longer exists`);
       return res.status(404).json({ success: false, error: 'Officer not found' });
     }
     if (officer.role === ROLES.ADMIN) {
@@ -172,9 +181,19 @@ export async function updateOfficer(req, res, next) {
     const { id } = req.params;
     const { name, email, deskLocation } = req.body;
 
-    const officer = await User.findOne({ _id: id, wardCode: req.user.wardCode });
-    if (!officer) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      console.warn(`[UPDATE OFFICER] Invalid ObjectId received: "${id}" from admin ${req.user._id} (ward ${req.user.wardCode})`);
       return res.status(404).json({ success: false, error: 'Officer not found' });
+    }
+
+    // Match getOfficers behavior: cross-ward visibility for admins, no wardCode filter.
+    const officer = await User.findOne({ _id: id });
+    if (!officer) {
+      console.warn(`[UPDATE OFFICER] No officer matches id "${id}" — admin ${req.user._id} (ward ${req.user.wardCode}) tried to update someone who no longer exists`);
+      return res.status(404).json({ success: false, error: 'Officer not found' });
+    }
+    if (officer.role === ROLES.ADMIN) {
+      return res.status(400).json({ success: false, error: 'Administrator accounts cannot be modified here.' });
     }
 
     if (name && name.trim()) officer.name = name.trim();

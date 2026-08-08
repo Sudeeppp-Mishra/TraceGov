@@ -873,7 +873,7 @@ export default function RegisterFilePage() {
                     <div key={item.id} className="flex items-center justify-between font-medium">
                       <span className="truncate pr-2">{item.label}</span>
                       <span
-                        className={`shrink-0 font-semibold ${
+                        className={`shrink-0 inline-flex items-center gap-1 font-semibold ${
                           item.status === 'verified'
                             ? 'text-emerald-600'
                             : item.status === 'needs_review'
@@ -881,11 +881,17 @@ export default function RegisterFilePage() {
                             : 'text-muted-foreground'
                         }`}
                       >
-                        {item.status === 'verified'
-                          ? '✓ Verified'
-                          : item.status === 'needs_review'
-                          ? '⚠️ Review needed'
-                          : 'Not uploaded'}
+                        {item.status === 'verified' ? (
+                          <>
+                            <Icons.Check className="h-3 w-3" /> Verified
+                          </>
+                        ) : item.status === 'needs_review' ? (
+                          <>
+                            <Icons.AlertCircle className="h-3 w-3" /> Review needed
+                          </>
+                        ) : (
+                          'Not uploaded'
+                        )}
                       </span>
                     </div>
                   ))}

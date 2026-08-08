@@ -667,11 +667,18 @@ function StageTypicalRow({ activeStageId }) {
   );
 }
 
-function NotificationDot({ icon, label, masked, active, count }) {
+function NotificationDot({ icon, channel, label, masked, active, count }) {
+  // Prefer a channel-driven icon (Icons.Mail / Icons.Phone) so the
+  // notification markers follow the app's icon-only design rule. The
+  // `icon` prop is kept for backwards compatibility — when passed a
+  // string we still render it, but new call sites should use `channel`.
+  let resolvedIcon = icon;
+  if (channel === 'email') resolvedIcon = <Icons.Mail className="h-3.5 w-3.5" />;
+  else if (channel === 'sms') resolvedIcon = <Icons.Phone className="h-3.5 w-3.5" />;
   return (
     <div className="flex items-center gap-2">
       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-        {icon}
+        {resolvedIcon}
       </span>
       <div>
         <span className="font-semibold text-foreground">{label}: </span>
@@ -1004,21 +1011,21 @@ function StatusCard({
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-xs">
           <div className="flex flex-wrap items-center gap-4">
             <NotificationDot
-              icon="📧"
+              channel="email"
               label="Email"
               masked={fileDetails.citizenEmailMasked}
               active={fileDetails.emailNotificationsActive}
             />
             <NotificationDot
-              icon="📱"
+              channel="sms"
               label="SMS"
               masked={fileDetails.citizenPhoneMasked || 'registered phone'}
               active
               count={fileDetails.smsNotificationsSent}
             />
           </div>
-          <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 font-bold text-emerald-600">
-            ✓ Notifications active
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-0.5 font-bold text-emerald-600">
+            <Icons.Check className="h-3 w-3" /> Notifications active
           </span>
         </div>
 

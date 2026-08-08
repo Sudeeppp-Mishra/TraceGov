@@ -7,8 +7,8 @@ import { SmsLog } from '../models/SmsLog.js';
 import { generateFileUid, generateTrackingId } from '../services/cryptoService.js';
 import { generateQrCode, parseQrPayload } from '../services/qrService.js';
 import { appendMovementLog, verifyLogChain } from '../services/ledgerService.js';
-import { sendSmsNotification } from '../services/smsService.js';
-import { sendEmailNotification } from '../services/emailService.js';
+import { sendSmsNotification, sendDocumentVerifiedSms, sendDocumentReceivedForReviewSms } from '../services/smsService.js';
+import { sendEmailNotification, sendDocumentVerifiedNotification, sendDocumentReceivedForReviewNotification } from '../services/emailService.js';
 import { aiAnalyzeDocument } from '../services/aiService.js';
 import {
   isDocMissing,
@@ -1693,24 +1693,45 @@ export async function uploadDocumentOnBehalf(req, res, next) {
         : `[OFFICER MANUAL] Uploaded on citizen's behalf: ${file.documentVerifications[idxNum].documentLabel}`,
     });
 
-    if (stillMissing.length === 0) {
-      try {
-        await sendSmsNotification({
+    // Per-row notification dispatch — mirrors `reviewDocumentReviewed`.
+    // The notification copy must match the row's actual post-save status:
+    //   - row → needs_review → "received and now under review" template.
+    //     The citizen should NOT read this as a confirmed/verified check.
+    //   - row → verified      → existing per-doc verified template (which
+    //     itself picks all-clear vs partial based on the helper lists).
+    // Fires on every successful upload regardless of whether other docs
+    // are still pending — same gating as Reviewed.
+    try {
+      const rowStatus = file.documentVerifications[idxNum].status;
+      const stillNeedsReview = getNeedsReviewDocs(file);
+      const isAllClear = stillMissing.length === 0 && stillNeedsReview.length === 0;
+
+      if (rowStatus === 'needs_review') {
+        await sendDocumentReceivedForReviewNotification({
           file,
-          status: file.currentStatus,
-          location: file.currentLocation,
-          missingDocuments: stillMissing,
+          documentLabel: file.documentVerifications[idxNum].documentLabel,
+          missingDocs: stillMissing,
+          needsReviewDocs: stillNeedsReview,
         });
-        await sendEmailNotification({
+        await sendDocumentReceivedForReviewSms({
           file,
-          status: file.currentStatus,
-          location: file.currentLocation,
-          notes: 'All required documents verified. Processing resumed.',
-          missingDocuments: stillMissing,
+          documentLabel: file.documentVerifications[idxNum].documentLabel,
         });
-      } catch (notifyErr) {
-        console.warn('uploadDocumentOnBehalf: notification failed:', notifyErr.message);
+      } else {
+        await sendDocumentVerifiedNotification({
+          file,
+          documentLabel: file.documentVerifications[idxNum].documentLabel,
+          missingDocs: stillMissing,
+          needsReviewDocs: stillNeedsReview,
+        });
+        await sendDocumentVerifiedSms({
+          file,
+          documentLabel: file.documentVerifications[idxNum].documentLabel,
+          isAllClear,
+        });
       }
+    } catch (notifyErr) {
+      console.warn('uploadDocumentOnBehalf: notification failed:', notifyErr.message);
     }
 
     return res.json({
@@ -1925,24 +1946,33 @@ export async function reviewDocumentReviewed(req, res, next) {
         : `${notePrefix} Marked ${dv.documentLabel} as reviewed`,
     });
 
-    if (stillMissing.length === 0) {
-      try {
-        await sendSmsNotification({
-          file,
-          status: file.currentStatus,
-          location: file.currentLocation,
-          missingDocuments: stillMissing,
-        });
-        await sendEmailNotification({
-          file,
-          status: file.currentStatus,
-          location: file.currentLocation,
-          notes: 'All required documents verified. Processing resumed.',
-          missingDocuments: stillMissing,
-        });
-      } catch (notifyErr) {
-        console.warn('reviewDocumentReviewed: notification failed:', notifyErr.message);
-      }
+    // Per-officer-reviewed notification: fires on every successful "Reviewed"
+    // click, whether or not this was the last outstanding document. The
+    // email template picks the all-clear vs partial variant based on the
+    // helper-derived lists, so the officer gets the same answer the citizen
+    // sees on the tracking page. Re-upload and upload-on-behalf deliberately
+    // do NOT route through this hook — they're not "review completions".
+    try {
+      const stillNeedsReview = getNeedsReviewDocs(file);
+      const isAllClear = stillMissing.length === 0 && stillNeedsReview.length === 0;
+
+      await sendDocumentVerifiedNotification({
+        file,
+        documentLabel: dv.documentLabel,
+        missingDocs: stillMissing,
+        needsReviewDocs: stillNeedsReview,
+      });
+
+      // Same gating as sendSmsNotification (env flag + citizenPhone) is
+      // enforced inside the dispatcher, so this is a no-op when the file
+      // has no phone number on record.
+      await sendDocumentVerifiedSms({
+        file,
+        documentLabel: dv.documentLabel,
+        isAllClear,
+      });
+    } catch (notifyErr) {
+      console.warn('reviewDocumentReviewed: notification failed:', notifyErr.message);
     }
 
     return res.json({

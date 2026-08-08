@@ -66,6 +66,12 @@ export function FileActions({
   // through here so the officer sees the same OCR panel as on the Register
   // page, without scrolling to the separate "AI Scan Detail" section.
   const [reuploadResultByLabel, setReuploadResultByLabel] = useState({});
+  // Per-row OCR feedback after an officer uploads a missing doc on the
+  // citizen's behalf. Mirrors `reuploadResultByLabel` so the Section A
+  // "Missing" rows can show the same inline OCR panel the Section B
+  // re-upload rows already use — extracted text, completeness %, stamp
+  // analysis, name match, confidence tier, "View extracted text" toggle.
+  const [uploadResultByLabel, setUploadResultByLabel] = useState({});
 
   const isScanVerified = scannedVia === 'webcam' || scannedVia === 'mobile';
 
@@ -176,6 +182,13 @@ export function FileActions({
   // Per-row handler: officer uploads a missing doc on the citizen's behalf.
   // Backend runs the standard AI OCR pipeline; status flips to verified on
   // a clean scan or stays needs_review if OCR flags any missing keywords.
+  //
+  // Modal-stays-open contract: this handler MUST NOT call
+  // `setIsResolveModalOpen(false)`. After success the row's status flips
+  // and the missing-docs section shrinks naturally because `missingDocs`
+  // / `needsReviewDocs` recompute from the refreshed `selectedFile`.
+  // The officer can act on the next document in the same session. Only
+  // explicit user dismissal (X / Close / Cancel) closes the modal.
   const handlePerRowUpload = async (docLabel, file) => {
     if (!file || !file.type.startsWith('image/')) return;
     const fileId = selectedFile?.id || selectedFile?._id;
@@ -194,12 +207,18 @@ export function FileActions({
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      await api.uploadDocumentOnBehalf(fileId, idx, {
+      const res = await api.uploadDocumentOnBehalf(fileId, idx, {
         imageBase64: base64,
         documentLabel: docLabel,
         scannedVia: 'manual',
         notes: resolveNotes.trim() || undefined,
       });
+      // Thread the OCR result back into per-row state so the officer sees
+      // exactly what the AI returned for this scan — same panel the
+      // Re-upload row and Register page use (DocumentOcrResult).
+      if (res?.documentVerification) {
+        setUploadResultByLabel((prev) => ({ ...prev, [docLabel]: res.documentVerification }));
+      }
       if (onResolveSuccess) onResolveSuccess();
     } catch (err) {
       setUploadErrorIdx((prev) => ({ ...prev, [docLabel]: err.message || 'Upload failed.' }));
@@ -213,6 +232,12 @@ export function FileActions({
   // includes the updated documentVerification, which we surface inline via
   // the shared DocumentOcrResult panel so the officer reads the same OCR
   // feedback they see on the Register page.
+  //
+  // Modal-stays-open contract: this handler MUST NOT call
+  // `setIsResolveModalOpen(false)`. After success the row's OCR payload is
+  // replaced and the row may flip status; the modal stays open so the
+  // officer can hit "Reviewed" (or re-upload again) without re-navigating.
+  // Only explicit user dismissal (X / Close / Cancel) closes the modal.
   const handlePerRowReupload = async (docLabel, file) => {
     if (!file || !file.type.startsWith('image/')) return;
     const fileId = selectedFile?.id || selectedFile?._id;
@@ -678,6 +703,13 @@ export function FileActions({
           shared helper. */}
       <Modal
         isOpen={isResolveModalOpen}
+        // Modal dismissal paths (intentional — do NOT add more):
+        //   1. this `onClose` — fires when the officer clicks X / Cancel.
+        //   2. the explicit Close button in the footer (see below).
+        // Per-row success handlers (handlePerRowUpload / Reupload /
+        // Reviewed) MUST NOT call setIsResolveModalOpen(false) — the
+        // modal stays open so the officer can resolve the next doc in
+        // the same sitting.
         onClose={() => setIsResolveModalOpen(false)}
         title="Resolve Attachments"
         description={`${selectedFile?.title || 'this file'} · ${missingDocs.length} missing · ${needsReviewDocs.length} under review`}
@@ -738,6 +770,48 @@ export function FileActions({
                     </div>
                     {err && (
                       <p className="pl-10 text-[11px] font-semibold text-red-600">{err}</p>
+                    )}
+                    {/* Inline OCR feedback for the latest upload on this
+                        row. Same shared `DocumentOcrResult` panel the
+                        Re-upload row and Register page use, so the officer
+                        reads identical OCR output here as anywhere else in
+                        the app — no need to close the modal or scroll to
+                        a separate "AI Scan Detail" section to see what
+                        the AI found. */}
+                    {uploadResultByLabel[doc] && (
+                      <div className="pl-10">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <p className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-amber-700 dark:text-amber-300">
+                            <Icons.Sparkles className="h-3.5 w-3.5" />
+                            Latest OCR scan
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setUploadResultByLabel((prev) => {
+                                const next = { ...prev };
+                                delete next[doc];
+                                return next;
+                              })
+                            }
+                            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:text-red-500 transition-colors cursor-pointer"
+                            title="Dismiss OCR result"
+                          >
+                            <Icons.X className="h-3 w-3" />
+                            Dismiss
+                          </button>
+                        </div>
+                        <DocumentOcrResult
+                          scanResult={uploadResultByLabel[doc]}
+                          documentLabel={doc}
+                          imagePreview={
+                            uploadResultByLabel[doc].imagePreviews?.[0] ||
+                            uploadResultByLabel[doc].imagePreview
+                          }
+                          pagePreviews={uploadResultByLabel[doc].imagePreviews || []}
+                          compact
+                        />
+                      </div>
                     )}
                   </div>
                 );
@@ -897,7 +971,9 @@ export function FileActions({
             </div>
           )}
 
-          {/* Footer */}
+          {/* Footer — only legitimate dismissal path on the in-modal
+              side. Per-row success handlers MUST NOT call
+              setIsResolveModalOpen(false). */}
           <div className="flex items-center justify-end gap-3 pt-1 border-t border-border">
             <Button variant="ghost" size="sm" onClick={() => setIsResolveModalOpen(false)} className="text-muted-foreground">
               Close
